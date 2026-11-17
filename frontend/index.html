@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>智驾辅助 Agent</title>
+  <link rel="stylesheet" href="/static/style.css" />
+  <script src="https://cdn.jsdelivr.net/npm/marked@15/marked.min.js"></script>
+</head>
+<body>
+  <div id="app">
+    <aside id="sidebar">
+      <div class="brand">
+        <span class="logo">🧭</span>
+        <div>
+          <h1>智驾辅助 Agent</h1>
+          <p>智能驾驶领域专家助理</p>
+        </div>
+      </div>
+
+      <div class="preset">
+        <h2>常用话题</h2>
+        <div id="presetTopics" class="topics"></div>
+      </div>
+
+      <div class="sidebar-footer">
+        <button id="settingsBtn" class="btn secondary">⚙️ 接口设置</button>
+      </div>
+    </aside>
+
+    <main id="main">
+      <header id="chatHeader">
+        <span class="status-dot" id="statusDot"></span>
+        <span id="statusText">未连接</span>
+      </header>
+
+      <div id="messages"></div>
+
+      <div id="welcome">
+        <h2>你好，我是智驾辅助 Agent 🚗</h2>
+        <p>我可以帮你解答感知、融合、规控、测试、功能安全等智驾领域问题。</p>
+        <div id="welcomeTopics" class="topics"></div>
+      </div>
+
+      <form id="chatForm">
+        <textarea id="input" placeholder="输入你的问题，Enter 发送，Shift+Enter 换行…" rows="1"></textarea>
+        <button type="submit" id="sendBtn" class="btn primary">发送</button>
+      </form>
+    </main>
+  </div>
+
+  <div id="settingsModal" class="modal hidden">
+    <div class="modal-box">
+      <h2>接口设置</h2>
+      <label>Base URL</label>
+      <input type="text" id="setBaseUrl" placeholder="https://api.openai.com/v1" />
+      <label>API Key</label>
+      <input type="password" id="setApiKey" placeholder="sk-..." />
+      <label>模型</label>
+      <input type="text" id="setModel" placeholder="gpt-4o-mini" />
+      <p class="hint">留空的项将使用服务端 .env 配置。API Key 仅保存在浏览器本地，不会上传。</p>
+      <div class="modal-actions">
+        <button id="modalCancel" class="btn secondary">取消</button>
+        <button id="modalSave" class="btn primary">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
