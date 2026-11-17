@@ -9,7 +9,7 @@ from pydantic import BaseModel
 
 from .config import settings
 from .llm import stream_chat
-from .prompt import PRESET_TOPICS
+from .prompt import PRESET_TOPICS, ROLES
 
 app = FastAPI(title="智驾辅助 Agent")
 
@@ -34,6 +34,10 @@ class ChatRequest(BaseModel):
     base_url: str | None = None
     api_key: str | None = None
     model: str | None = None
+    role: str = "general"
+    system_prompt: str | None = None
+    temperature: float = 0.7
+    max_tokens: int | None = None
 
 
 class SettingsResponse(BaseModel):
@@ -41,6 +45,7 @@ class SettingsResponse(BaseModel):
     model: str
     has_api_key: bool
     preset_topics: list[str]
+    roles: dict[str, dict]
 
 
 @app.get("/api/settings")
@@ -50,7 +55,15 @@ async def get_settings() -> SettingsResponse:
         model=settings.llm_model,
         has_api_key=bool(settings.llm_api_key),
         preset_topics=PRESET_TOPICS,
+        roles={k: {"name": v["name"], "icon": v["icon"]} for k, v in ROLES.items()},
     )
+
+
+@app.get("/api/prompt")
+async def get_prompt(role: str = "general") -> dict:
+    from .prompt import build_system_prompt
+
+    return {"prompt": build_system_prompt(role, None)}
 
 
 @app.post("/api/chat")
@@ -69,6 +82,10 @@ async def chat(req: ChatRequest):
                 base_url=req.base_url,
                 api_key=req.api_key,
                 model=req.model,
+                role=req.role,
+                system_prompt=req.system_prompt,
+                temperature=req.temperature,
+                max_tokens=req.max_tokens,
             ):
                 yield f"data: {json.dumps({'delta': piece}, ensure_ascii=False)}\n\n"
             yield "data: [DONE]\n\n"

@@ -4,8 +4,10 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>智驾辅助 Agent</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11/styles/github-dark.min.css" />
   <link rel="stylesheet" href="/static/style.css" />
   <script src="https://cdn.jsdelivr.net/npm/marked@15/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/highlight.js@11/highlight.min.js"></script>
 </head>
 <body>
   <div id="app">
@@ -18,47 +20,73 @@
         </div>
       </div>
 
+      <button id="newChatBtn" class="btn primary full">+ 新建会话</button>
+
+      <div class="preset">
+        <h2>角色模式</h2>
+        <div id="roleList" class="role-list"></div>
+      </div>
+
       <div class="preset">
         <h2>常用话题</h2>
         <div id="presetTopics" class="topics"></div>
       </div>
 
       <div class="sidebar-footer">
-        <button id="settingsBtn" class="btn secondary">⚙️ 接口设置</button>
+        <button id="settingsBtn" class="btn secondary full">⚙️ 接口与参数设置</button>
       </div>
     </aside>
 
     <main id="main">
       <header id="chatHeader">
-        <span class="status-dot" id="statusDot"></span>
-        <span id="statusText">未连接</span>
+        <div class="header-left">
+          <span class="status-dot" id="statusDot"></span>
+          <span id="statusText">未连接</span>
+        </div>
+        <div class="header-right">
+          <select id="modelSelect" title="当前模型"></select>
+        </div>
       </header>
+
+      <div id="sessionTitle" class="session-title">新会话</div>
 
       <div id="messages"></div>
 
       <div id="welcome">
         <h2>你好，我是智驾辅助 Agent 🚗</h2>
-        <p>我可以帮你解答感知、融合、规控、测试、功能安全等智驾领域问题。</p>
+        <p>选择角色模式，或直接输入问题。可覆盖感知、融合、规控、测试、功能安全等智驾领域。</p>
         <div id="welcomeTopics" class="topics"></div>
       </div>
 
       <form id="chatForm">
-        <textarea id="input" placeholder="输入你的问题，Enter 发送，Shift+Enter 换行…" rows="1"></textarea>
-        <button type="submit" id="sendBtn" class="btn primary">发送</button>
+        <div class="input-row">
+          <textarea id="input" placeholder="输入你的问题，Enter 发送，Shift+Enter 换行…" rows="1"></textarea>
+          <button type="submit" id="sendBtn" class="btn primary">发送</button>
+          <button type="button" id="stopBtn" class="btn danger hidden">停止</button>
+        </div>
+        <div class="form-footer">
+          <span class="hint">Enter 发送 · Shift+Enter 换行 · 支持 Markdown</span>
+        </div>
       </form>
     </main>
   </div>
 
   <div id="settingsModal" class="modal hidden">
     <div class="modal-box">
-      <h2>接口设置</h2>
+      <h2>接口与参数设置</h2>
       <label>Base URL</label>
       <input type="text" id="setBaseUrl" placeholder="https://api.openai.com/v1" />
       <label>API Key</label>
       <input type="password" id="setApiKey" placeholder="sk-..." />
       <label>模型</label>
       <input type="text" id="setModel" placeholder="gpt-4o-mini" />
-      <p class="hint">留空的项将使用服务端 .env 配置。API Key 仅保存在浏览器本地，不会上传。</p>
+      <label>温度（Temperature，0~2，越高越发散）</label>
+      <input type="number" id="setTemperature" min="0" max="2" step="0.1" value="0.7" />
+      <label>最大输出 Tokens（留空不限）</label>
+      <input type="number" id="setMaxTokens" min="1" placeholder="留空不限" />
+      <label>自定义系统提示词（覆盖角色模式，留空用角色默认）</label>
+      <textarea id="setSystemPrompt" rows="4" placeholder="可粘贴你的专属 prompt…"></textarea>
+      <p class="hint">API Key 仅保存在浏览器本地。留空则使用服务端 .env 配置。</p>
       <div class="modal-actions">
         <button id="modalCancel" class="btn secondary">取消</button>
         <button id="modalSave" class="btn primary">保存</button>
