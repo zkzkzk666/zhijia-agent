@@ -10,9 +10,11 @@ const statusDot = $("#statusDot");
 const statusText = $("#statusText");
 const modelSelect = $("#modelSelect");
 const sessionTitleEl = $("#sessionTitle");
+const themeToggle = $("#themeToggle");
 
 const STORE_KEY = "zj.sessions.v2";
 const SETTINGS_KEY = "zj.settings.v2";
+const THEME_KEY = "zj.theme";
 
 const state = {
   sessions: [],
@@ -32,31 +34,43 @@ const state = {
   abort: null,
 };
 
-let markedReady = false;
 if (window.marked) {
   marked.setOptions({ breaks: true, gfm: true });
-  markedReady = true;
 }
 if (window.hljs) {
   hljs.configure({ languages: [] });
 }
 
-/* ---------- persistence ---------- */
+/* ---------- theme ---------- */
+function applyTheme(theme) {
+  document.documentElement.dataset.theme = theme;
+  themeToggle.textContent = theme === "dark" ? "☀️" : "🌙";
+  localStorage.setItem(THEME_KEY, theme);
+  document.querySelectorAll('link[href*="highlight.js"]').forEach((l) => {
+    l.href = theme === "dark"
+      ? "https://cdn.jsdelivr.net/npm/highlight.js@11/styles/github-dark.min.css"
+      : "https://cdn.jsdelivr.net/npm/highlight.js@11/styles/github.min.css";
+  });
+}
+function initTheme() {
+  const saved = localStorage.getItem(THEME_KEY);
+  const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+  applyTheme(saved || (prefersDark ? "dark" : "light"));
+}
+themeToggle.addEventListener("click", () => {
+  applyTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark");
+});
 
+/* ---------- persistence ---------- */
 function loadSessions() {
   try {
     const raw = localStorage.getItem(STORE_KEY);
     if (raw) state.sessions = JSON.parse(raw);
-  } catch (e) {
-    state.sessions = [];
-  }
+  } catch (e) { state.sessions = []; }
   if (!state.sessions.length) createSession();
   state.activeId = state.sessions[0].id;
 }
-
-function saveSessions() {
-  localStorage.setItem(STORE_KEY, JSON.stringify(state.sessions));
-}
+function saveSessions() { localStorage.setItem(STORE_KEY, JSON.stringify(state.sessions)); }
 
 function loadSettings() {
   try {
@@ -64,13 +78,9 @@ function loadSettings() {
     if (raw) state.settings = { ...state.settings, ...JSON.parse(raw) };
   } catch (e) { /* ignore */ }
 }
-
-function saveSettings() {
-  localStorage.setItem(SETTINGS_KEY, JSON.stringify(state.settings));
-}
+function saveSettings() { localStorage.setItem(SETTINGS_KEY, JSON.stringify(state.settings)); }
 
 /* ---------- sessions ---------- */
-
 function createSession() {
   const s = {
     id: "s" + Date.now() + Math.random().toString(16).slice(2, 6),
@@ -89,8 +99,7 @@ function createSession() {
 
 function switchSession(id) {
   state.activeId = id;
-  state.streaming = false;
-  if (state.abort) state.abort.abort();
+  if (state.streaming) { state.abort?.abort(); state.streaming = false; }
   renderSessions();
   renderMessages();
 }
@@ -125,22 +134,46 @@ function renameSession(id) {
   }
 }
 
+function clearSession() {
+  const s = getActive();
+  if (!s.messages.length) return;
+  if (!confirm("确定清空当前会话的全部消息？")) return;
+  s.messages = [];
+  s.title = "新会话";
+  saveSessions();
+  renderSessions();
+  renderMessages();
+  toast("已清空当前会话");
+}
+
+function exportSession() {
+  const s = getActive();
+  if (!s.messages.length) return toast("当前会话没有消息");
+  const lines = [`# ${s.title}`, "", `> 导出时间：${new Date().toLocaleString("zh-CN")}`, "> 角色：" + (state.roles[s.role]?.name || s.role), ""];
+  s.messages.forEach((m) => {
+    lines.push(m.role === "user" ? "## 👤 用户" : "## 🧭 智驾 Agent", "", m.content, "");
+  });
+  const blob = new Blob([lines.join("\n")], { type: "text/markdown;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `${s.title || "session"}.md`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+  toast("已导出 Markdown");
+}
+
 function getActive() {
   return state.sessions.find((x) => x.id === state.activeId) || state.sessions[0];
 }
 
-function activeMessages() {
-  return getActive().messages;
-}
-
 /* ---------- rendering ---------- */
-
 function setStatus(online, text) {
   statusDot.classList.toggle("online", online);
   statusText.textContent = text;
 }
 
 function renderSessions() {
+  document.querySelector(".sessions")?.remove();
   const container = document.createElement("div");
   container.className = "sessions";
   state.sessions.forEach((s) => {
@@ -151,8 +184,7 @@ function renderSessions() {
       <span class="session-actions">
         <button class="mini" data-act="rename" title="重命名">✎</button>
         <button class="mini danger" data-act="delete" title="删除">🗑</button>
-      </span>
-    `;
+      </span>`;
     item.onclick = (e) => {
       const act = e.target.closest("button")?.dataset.act;
       if (act === "rename") { e.stopPropagation(); renameSession(s.id); return; }
@@ -161,8 +193,6 @@ function renderSessions() {
     };
     container.appendChild(item);
   });
-  const old = $(".sessions");
-  if (old) old.remove();
   $("#newChatBtn").after(container);
 }
 
@@ -180,6 +210,7 @@ function renderRoles(roles) {
       const s = getActive();
       s.role = key;
       saveSessions();
+      toast(`已切换为「${r.name}」`);
     };
     el.appendChild(btn);
   });
@@ -193,10 +224,7 @@ function renderPresetTopics(topics) {
       const chip = document.createElement("button");
       chip.className = "topic-chip";
       chip.textContent = t;
-      chip.onclick = () => {
-        input.value = t;
-        submit();
-      };
+      chip.onclick = () => { input.value = t; submit(); };
       el.appendChild(chip);
     });
   });
@@ -204,89 +232,133 @@ function renderPresetTopics(topics) {
 
 function renderMessages() {
   messagesEl.innerHTML = "";
-  const msgs = activeMessages();
+  const msgs = getActive().messages;
+  sessionTitleEl.textContent = getActive().title;
   if (!msgs.length) {
     welcomeEl.style.display = "flex";
-    sessionTitleEl.textContent = getActive().title;
     return;
   }
   welcomeEl.style.display = "none";
-  msgs.forEach((m) => appendMessageDom(m.role, m.content, m.error, false));
-  sessionTitleEl.textContent = getActive().title;
+  msgs.forEach((m) => appendMessageDom(m.role, m.content, m.error, m.time, false));
   messagesEl.scrollTop = messagesEl.scrollHeight;
 }
 
-function appendMessageDom(role, content, error, streaming) {
+function fmtTime(ts) {
+  if (!ts) return "";
+  const d = new Date(ts);
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  return `${hh}:${mm}`;
+}
+
+function appendMessageDom(role, content, error, ts, streaming) {
   const row = document.createElement("div");
   row.className = `message ${role}`;
   const avatar = role === "user" ? "👤" : "🧭";
   row.innerHTML = `
     <div class="avatar">${avatar}</div>
-    <div class="bubble"></div>
-  `;
+    <div class="msg-body">
+      <div class="bubble${error ? " error" : ""}"></div>
+      <div class="msg-meta">
+        <span class="msg-time">${streaming ? "" : fmtTime(ts || Date.now())}</span>
+        <span class="msg-actions"></span>
+      </div>
+    </div>`;
   const bubble = row.querySelector(".bubble");
-  if (error) bubble.classList.add("error");
-  renderBubble(bubble, content, streaming);
-  if (!streaming) {
-    const actions = document.createElement("div");
-    actions.className = "msg-actions";
+  const actions = row.querySelector(".msg-actions");
+
+  if (streaming) {
+    renderBubble(bubble, content, true);
+  } else {
+    renderBubble(bubble, content, false);
     actions.innerHTML = `
+      ${role === "assistant" ? '<button class="mini" data-act="regenerate" title="重新生成">↻</button>' : ""}
       <button class="mini" data-act="copy" title="复制">📋</button>
-      <button class="mini" data-act="regenerate" title="重新生成">↻</button>
-    `;
+      <button class="mini" data-act="edit" title="编辑重发">✎</button>
+      <button class="mini danger" data-act="delete" title="删除">🗑</button>`;
+
     if (role === "assistant") {
-      row.appendChild(actions);
-      row.querySelector('[data-act="copy"]').onclick = () => {
-        navigator.clipboard.writeText(bubble.textContent).then(() => {
-          actions.querySelector('[data-act="copy"]').textContent = "✓";
-          setTimeout(() => (actions.querySelector('[data-act="copy"]').textContent = "📋"), 1200);
-        });
-      };
-      row.querySelector('[data-act="regenerate"]').onclick = () => regenerateLast();
+      actions.querySelector('[data-act="regenerate"]').onclick = () => regenerateLast();
     }
+    actions.querySelector('[data-act="copy"]').onclick = () => {
+      navigator.clipboard.writeText(bubble.textContent).then(() => {
+        toast("已复制");
+      });
+    };
+    actions.querySelector('[data-act="edit"]').onclick = () => editMessage(row, role, content);
+    actions.querySelector('[data-act="delete"]').onclick = () => deleteMessage(row, role, content);
   }
+
   messagesEl.appendChild(row);
   messagesEl.scrollTop = messagesEl.scrollHeight;
-  return { row, bubble };
+  return row;
 }
 
 function renderBubble(el, text, streaming) {
-  if (markedReady) {
-    const html = marked.parse(text);
+  if (markedReady()) {
+    const html = marked.parse(text || "");
     el.innerHTML = html + (streaming ? '<span class="cursor">▍</span>' : "");
     el.querySelectorAll("pre code").forEach((block) => {
       if (window.hljs) hljs.highlightElement(block);
-      const copyBtn = document.createElement("button");
-      copyBtn.className = "code-copy mini";
-      copyBtn.textContent = "复制";
-      copyBtn.onclick = () => navigator.clipboard.writeText(block.textContent);
       const pre = block.parentElement;
-      pre.style.position = "relative";
-      pre.appendChild(copyBtn);
+      if (!pre.querySelector(".code-copy")) {
+        const copyBtn = document.createElement("button");
+        copyBtn.className = "code-copy";
+        copyBtn.textContent = "复制";
+        copyBtn.onclick = () => navigator.clipboard.writeText(block.textContent).then(() => toast("已复制代码"));
+        pre.appendChild(copyBtn);
+      }
     });
   } else {
     el.textContent = text;
   }
 }
 
+function markedReady() {
+  return !!window.marked;
+}
+
 function escapeHtml(s) {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+/* ---------- message edit / delete ---------- */
+function editMessage(row, role, content) {
+  const s = getActive();
+  const idx = s.messages.findIndex((m) => m.role === role && m.content === content);
+  if (idx === -1) return;
+  const newText = prompt("编辑这条消息", content);
+  if (newText === null) return;
+  s.messages[idx] = { role, content: newText, time: Date.now() };
+  if (role === "user" && s.messages[idx + 1]?.role === "assistant") {
+    s.messages.splice(idx + 1, 1); // 删除随后的回答
+  }
+  saveSessions();
+  renderMessages();
+  if (role === "user") toast("已更新并重新发送");
+}
+
+function deleteMessage(row, role, content) {
+  const s = getActive();
+  const idx = s.messages.findIndex((m) => m.role === role && m.content === content);
+  if (idx === -1) return;
+  s.messages.splice(idx, 1);
+  saveSessions();
+  renderMessages();
 }
 
 /* ---------- chat ---------- */
-
 async function submit() {
   const text = input.value.trim();
   if (!text || state.streaming) return;
 
   const s = getActive();
-  s.messages.push({ role: "user", content: text });
+  s.messages.push({ role: "user", content: text, time: Date.now() });
   if (s.title === "新会话") s.title = text.slice(0, 20);
   sessionTitleEl.textContent = s.title;
   saveSessions();
   renderSessions();
-
-  appendMessageDom("user", text);
+  appendMessageDom("user", text, false, Date.now(), false);
   input.value = "";
   autoResize();
   welcomeEl.style.display = "none";
@@ -311,7 +383,8 @@ async function sendToLLM(s) {
   stopBtn.classList.remove("hidden");
   form.classList.add("streaming");
 
-  const { row, bubble } = appendMessageDom("assistant", "", false, true);
+  const row = appendMessageDom("assistant", "", false, Date.now(), true);
+  const bubble = row.querySelector(".bubble");
   let full = "";
   const controller = new AbortController();
   state.abort = controller;
@@ -352,15 +425,11 @@ async function sendToLLM(s) {
         if (!line.startsWith("data:")) continue;
         const payload = line.slice(5).trim();
         if (payload === "[DONE]") continue;
-        try {
-          const data = JSON.parse(payload);
-          if (data.error) throw new Error(data.error);
-          full += data.delta || "";
-          renderBubble(bubble, full, true);
-          messagesEl.scrollTop = messagesEl.scrollHeight;
-        } catch (e) {
-          throw e;
-        }
+        const data = JSON.parse(payload);
+        if (data.error) throw new Error(data.error);
+        full += data.delta || "";
+        renderBubble(bubble, full, true);
+        messagesEl.scrollTop = messagesEl.scrollHeight;
       }
     }
   } catch (e) {
@@ -375,45 +444,32 @@ async function sendToLLM(s) {
     stopBtn.classList.add("hidden");
     form.classList.remove("streaming");
     if (full) {
-      s.messages.push({ role: "assistant", content: full });
+      s.messages.push({ role: "assistant", content: full, time: Date.now() });
       saveSessions();
       renderMessages();
     } else {
-      // failed or empty: remove the placeholder
       row.remove();
     }
     input.focus();
   }
 }
 
-stopBtn.addEventListener("click", () => {
-  if (state.abort) state.abort.abort();
-});
+stopBtn.addEventListener("click", () => { state.abort?.abort(); });
 
 /* ---------- events ---------- */
-
-form.addEventListener("submit", (e) => {
-  e.preventDefault();
-  submit();
-});
-
+form.addEventListener("submit", (e) => { e.preventDefault(); submit(); });
 input.addEventListener("keydown", (e) => {
-  if (e.key === "Enter" && !e.shiftKey) {
-    e.preventDefault();
-    submit();
-  }
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); }
   autoResize();
 });
-
 function autoResize() {
   input.style.height = "auto";
   input.style.height = Math.min(input.scrollHeight, 150) + "px";
 }
 
-$("#newChatBtn").addEventListener("click", () => {
-  createSession();
-  input.focus();
-});
+$("#newChatBtn").addEventListener("click", () => { createSession(); input.focus(); });
+$("#clearSessionBtn").addEventListener("click", clearSession);
+$("#exportBtn").addEventListener("click", exportSession);
 
 $("#settingsBtn").addEventListener("click", () => {
   $("#setBaseUrl").value = state.settings.baseUrl;
@@ -424,11 +480,8 @@ $("#settingsBtn").addEventListener("click", () => {
   $("#setSystemPrompt").value = state.settings.systemPrompt;
   $("#settingsModal").classList.remove("hidden");
 });
-
-$("#modalCancel").addEventListener("click", () => {
-  $("#settingsModal").classList.add("hidden");
-});
-
+$("#modalClose").addEventListener("click", () => $("#settingsModal").classList.add("hidden"));
+$("#modalCancel").addEventListener("click", () => $("#settingsModal").classList.add("hidden"));
 $("#modalSave").addEventListener("click", () => {
   state.settings.baseUrl = $("#setBaseUrl").value.trim();
   state.settings.apiKey = $("#setApiKey").value.trim();
@@ -441,10 +494,20 @@ $("#modalSave").addEventListener("click", () => {
   const hasKey = !!state.settings.apiKey;
   setStatus(hasKey, hasKey ? "已连接（浏览器配置）" : "将使用服务端配置");
   populateModelSelect();
+  toast("设置已保存");
 });
 
-/* ---------- init ---------- */
+/* ---------- toast ---------- */
+let toastTimer = null;
+function toast(msg) {
+  const t = $("#toast");
+  t.textContent = msg;
+  t.classList.remove("hidden");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.add("hidden"), 2000);
+}
 
+/* ---------- model select ---------- */
 function populateModelSelect() {
   const model = state.settings.model;
   modelSelect.innerHTML = "";
@@ -459,12 +522,12 @@ function populateModelSelect() {
   });
   modelSelect.value = model;
 }
-
 modelSelect.addEventListener("change", () => {
   state.settings.model = modelSelect.value;
   saveSettings();
 });
 
+/* ---------- init ---------- */
 async function fetchSettings() {
   try {
     const res = await fetch("/api/settings");
@@ -488,6 +551,7 @@ async function fetchSettings() {
   }
 }
 
+initTheme();
 loadSessions();
 loadSettings();
 fetchSettings();
