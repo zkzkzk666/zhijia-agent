@@ -41,20 +41,70 @@ if (window.hljs) {
   hljs.configure({ languages: [] });
 }
 
+/* ---------- CDN loader (multi-mirror fallback) ---------- */
+function loadScript(urls, check) {
+  return new Promise((resolve) => {
+    if (check()) return resolve(true);
+    let i = 0;
+    const tryNext = () => {
+      if (i >= urls.length) return resolve(false);
+      const s = document.createElement("script");
+      s.src = urls[i++];
+      s.onload = () => resolve(true);
+      s.onerror = tryNext;
+      document.head.appendChild(s);
+    };
+    tryNext();
+  });
+}
+
+const CDN_MIRRORS = {
+  marked: [
+    "https://cdn.jsdelivr.net/npm/marked@15/marked.min.js",
+    "https://unpkg.com/marked@15/marked.min.js",
+    "https://fastly.jsdelivr.net/npm/marked@15/marked.min.js",
+  ],
+  hljs: [
+    "https://cdn.jsdelivr.net/npm/highlight.js@11/highlight.min.js",
+    "https://unpkg.com/highlight.js@11/highlight.min.js",
+    "https://fastly.jsdelivr.net/npm/highlight.js@11/highlight.min.js",
+  ],
+};
+
+async function loadLibs() {
+  const okMarked = await loadScript(CDN_MIRRORS.marked, () => !!window.marked);
+  const okHljs = await loadScript(CDN_MIRRORS.hljs, () => !!window.hljs);
+  if (okMarked) marked.setOptions({ breaks: true, gfm: true });
+  if (okHljs) hljs.configure({ languages: [] });
+  return { okMarked, okHljs };
+}
+
 /* ---------- theme ---------- */
+function safeGet(key) {
+  try { return localStorage.getItem(key); } catch (e) { return null; }
+}
+function safeSet(key, val) {
+  try { localStorage.setItem(key, val); } catch (e) { /* ignore */ }
+}
 function applyTheme(theme) {
   document.documentElement.dataset.theme = theme;
   themeToggle.textContent = theme === "dark" ? "☀️" : "🌙";
-  localStorage.setItem(THEME_KEY, theme);
-  document.querySelectorAll('link[href*="highlight.js"]').forEach((l) => {
-    l.href = theme === "dark"
-      ? "https://cdn.jsdelivr.net/npm/highlight.js@11/styles/github-dark.min.css"
-      : "https://cdn.jsdelivr.net/npm/highlight.js@11/styles/github.min.css";
-  });
+  safeSet(THEME_KEY, theme);
+  let css = document.getElementById("hljs-css");
+  if (!css) {
+    css = document.createElement("link");
+    css.id = "hljs-css";
+    css.rel = "stylesheet";
+    document.head.appendChild(css);
+  }
+  css.href = theme === "dark"
+    ? "https://cdn.jsdelivr.net/npm/highlight.js@11/styles/github-dark.min.css"
+    : "https://cdn.jsdelivr.net/npm/highlight.js@11/styles/github.min.css";
 }
 function initTheme() {
-  const saved = localStorage.getItem(THEME_KEY);
-  const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+  const saved = safeGet(THEME_KEY);
+  let prefersDark = false;
+  try { prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches; } catch (e) { /* ignore */ }
   applyTheme(saved || (prefersDark ? "dark" : "light"));
 }
 themeToggle.addEventListener("click", () => {
@@ -64,21 +114,21 @@ themeToggle.addEventListener("click", () => {
 /* ---------- persistence ---------- */
 function loadSessions() {
   try {
-    const raw = localStorage.getItem(STORE_KEY);
+    const raw = safeGet(STORE_KEY);
     if (raw) state.sessions = JSON.parse(raw);
   } catch (e) { state.sessions = []; }
   if (!state.sessions.length) createSession();
   state.activeId = state.sessions[0].id;
 }
-function saveSessions() { localStorage.setItem(STORE_KEY, JSON.stringify(state.sessions)); }
+function saveSessions() { safeSet(STORE_KEY, JSON.stringify(state.sessions)); }
 
 function loadSettings() {
   try {
-    const raw = localStorage.getItem(SETTINGS_KEY);
+    const raw = safeGet(SETTINGS_KEY);
     if (raw) state.settings = { ...state.settings, ...JSON.parse(raw) };
   } catch (e) { /* ignore */ }
 }
-function saveSettings() { localStorage.setItem(SETTINGS_KEY, JSON.stringify(state.settings)); }
+function saveSettings() { safeSet(SETTINGS_KEY, JSON.stringify(state.settings)); }
 
 /* ---------- sessions ---------- */
 function createSession() {
@@ -557,3 +607,4 @@ loadSettings();
 fetchSettings();
 renderMessages();
 input.focus();
+loadLibs().then(() => renderMessages());

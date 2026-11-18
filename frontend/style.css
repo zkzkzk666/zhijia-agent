@@ -178,7 +178,7 @@ html[data-theme="dark"] .btn.danger { background: #7f1d1d; color: #fecaca; borde
 .sidebar-footer { margin-top: auto; }
 
 /* ============ Main ============ */
-#main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+#main { flex: 1; display: flex; flex-direction: column; min-width: 0; position: relative; }
 
 #chatHeader {
   padding: 14px 28px;
@@ -310,7 +310,8 @@ html[data-theme="dark"] .btn.danger { background: #7f1d1d; color: #fecaca; borde
 
 /* Welcome */
 #welcome {
-  flex: 1;
+  position: absolute;
+  inset: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -318,7 +319,10 @@ html[data-theme="dark"] .btn.danger { background: #7f1d1d; color: #fecaca; borde
   gap: 24px;
   padding: 24px;
   text-align: center;
+  pointer-events: none;
+  z-index: 1;
 }
+#welcome .topics, #welcome .topic-chip { pointer-events: auto; }
 .welcome-hero {
   background: var(--bg-card);
   border: 1px solid var(--border);
