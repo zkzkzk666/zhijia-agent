@@ -14,11 +14,15 @@ const themeToggle = $("#themeToggle");
 const kbFileInput = $("#kbFileInput");
 const sessionSearch = $("#sessionSearch");
 const templateSelect = $("#templateSelect");
+const attachBtn = $("#attachBtn");
+const attachInput = $("#attachInput");
+const attachChip = $("#attachChip");
 
 const STORE_KEY = "zj.sessions.v2";
 const SETTINGS_KEY = "zj.settings.v2";
 const THEME_KEY = "zj.theme";
 const KB_KEY = "zj.kb.v1";
+const PROVIDERS_KEY = "zj.providers.v1";
 
 const state = {
   sessions: [],
@@ -29,15 +33,23 @@ const state = {
     model: "",
     temperature: 0.7,
     maxTokens: null,
+    topP: 1,
+    frequencyPenalty: 0,
+    presencePenalty: 0,
     systemPrompt: "",
     role: "general",
     kbTopK: 3,
+    templateId: "none",
+    streamReasoning: false,
   },
+  providers: [],
+  activeProviderId: null,
   roles: {},
   presetTopics: [],
   templates: [],
   kb: [],
   searchFilter: "",
+  pendingFiles: [],
   streaming: false,
   abort: null,
 };
@@ -115,14 +127,42 @@ const CDN_MIRRORS = {
     "https://unpkg.com/highlight.js@11/highlight.min.js",
     "https://fastly.jsdelivr.net/npm/highlight.js@11/highlight.min.js",
   ],
+  katex: [
+    "https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js",
+    "https://unpkg.com/katex@0.16.11/dist/katex.min.js",
+  ],
+  katexCss: [
+    "https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css",
+    "https://unpkg.com/katex@0.16.11/dist/katex.min.css",
+  ],
+  mermaid: [
+    "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js",
+    "https://unpkg.com/mermaid@11/dist/mermaid.min.js",
+  ],
 };
+
+function loadCss(urls) {
+  for (const url of urls) {
+    const link = document.createElement("link");
+    link.rel = "stylesheet";
+    link.href = url;
+    document.head.appendChild(link);
+    break;
+  }
+}
 
 async function loadLibs() {
   const okMarked = await loadScript(CDN_MIRRORS.marked, () => !!window.marked);
   const okHljs = await loadScript(CDN_MIRRORS.hljs, () => !!window.hljs);
+  const okKatex = await loadScript(CDN_MIRRORS.katex, () => !!window.katex);
+  const okMermaid = await loadScript(CDN_MIRRORS.mermaid, () => !!window.mermaid);
   if (okMarked) marked.setOptions({ breaks: true, gfm: true });
   if (okHljs) hljs.configure({ languages: [] });
-  return { okMarked, okHljs };
+  if (okKatex) loadCss(CDN_MIRRORS.katexCss);
+  if (okMermaid && window.mermaid) {
+    mermaid.initialize({ startOnLoad: false, theme: document.documentElement.dataset.theme === "dark" ? "dark" : "default" });
+  }
+  return { okMarked, okHljs, okKatex, okMermaid };
 }
 
 /* ---------- theme ---------- */
@@ -180,6 +220,54 @@ function loadKb() {
   } catch (e) { state.kb = []; }
 }
 function saveKb() { safeSet(KB_KEY, JSON.stringify(state.kb)); }
+
+/* ---------- providers ---------- */
+function loadProviders() {
+  try {
+    const raw = safeGet(PROVIDERS_KEY);
+    if (raw) state.providers = JSON.parse(raw);
+  } catch (e) { state.providers = []; }
+  state.activeProviderId = safeGet(PROVIDERS_KEY + ".active") || (state.providers[0]?.id ?? null);
+  if (state.providers.length && state.activeProviderId) {
+    const p = state.providers.find((x) => x.id === state.activeProviderId);
+    if (p) {
+      state.settings.baseUrl = p.baseUrl;
+      state.settings.apiKey = p.apiKey;
+      state.settings.model = p.model;
+    }
+  }
+}
+function saveProviders() { safeSet(PROVIDERS_KEY, JSON.stringify(state.providers)); }
+
+function renderProviders() {
+  const sel = $("#providerSelect");
+  sel.innerHTML = "";
+  const opts = [{ id: "manual", label: "手动配置（临时）" }, ...state.providers.map((p) => ({ id: p.id, label: `${p.name} — ${p.model}` }))];
+  opts.forEach((o) => {
+    const opt = document.createElement("option");
+    opt.value = o.id;
+    opt.textContent = o.label;
+    sel.appendChild(opt);
+  });
+  sel.value = state.activeProviderId || "manual";
+}
+
+function applyProvider(id) {
+  const p = state.providers.find((x) => x.id === id);
+  state.activeProviderId = id;
+  safeSet(PROVIDERS_KEY + ".active", id);
+  if (p) {
+    state.settings.baseUrl = p.baseUrl;
+    state.settings.apiKey = p.apiKey;
+    state.settings.model = p.model;
+    $("#setBaseUrl").value = p.baseUrl;
+    $("#setApiKey").value = p.apiKey;
+    $("#setModel").value = p.model;
+    toast(`已切换配置「${p.name}」`);
+  } else {
+    toast("已切换为手动配置");
+  }
+}
 
 /* ---------- knowledge base ---------- */
 function chunkText(text) {
@@ -280,6 +368,63 @@ kbFileInput.addEventListener("change", async () => {
   renderKb();
 });
 
+/* ---------- attach files to chat ---------- */
+attachBtn.addEventListener("click", () => attachInput.click());
+attachInput.addEventListener("change", async () => {
+  const files = [...attachInput.files];
+  attachInput.value = "";
+  for (const file of files) {
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await fetch("/api/extract", { method: "POST", body: fd });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+      state.pendingFiles.push({ name: data.filename, text: data.text, chars: data.chars });
+      toast(`已读取「${data.filename}」(${data.chars}字符)`);
+    } catch (e) {
+      toast(`「${file.name}」失败：${e.message}`);
+    }
+  }
+  renderAttachChip();
+});
+
+function renderAttachChip() {
+  if (!state.pendingFiles.length) {
+    attachChip.classList.add("hidden");
+    attachChip.innerHTML = "";
+    return;
+  }
+  attachChip.classList.remove("hidden");
+  attachChip.innerHTML = state.pendingFiles.map((f, i) => `
+    <span class="attach-item">
+      📎 ${escapeHtml(f.name)}
+      <button class="mini" data-idx="${i}" data-act="tokb" title="加入知识库">＋KB</button>
+      <button class="mini danger" data-idx="${i}" data-act="remove" title="移除">✕</button>
+    </span>`).join("");
+  attachChip.querySelectorAll("button").forEach((btn) => {
+    btn.onclick = () => {
+      const i = parseInt(btn.dataset.idx);
+      const f = state.pendingFiles[i];
+      if (btn.dataset.act === "remove") {
+        state.pendingFiles.splice(i, 1);
+      } else if (btn.dataset.act === "tokb") {
+        const chunks = chunkText(f.text);
+        state.kb.push({ name: f.name, enabled: true, chunks, size: f.text.length });
+        state.pendingFiles.splice(i, 1);
+        saveKb();
+        renderKb();
+        toast(`已加入知识库「${f.name}」`);
+      }
+      renderAttachChip();
+    };
+  });
+}
+
+function pendingFilesContent() {
+  return state.pendingFiles.map((f) => `\n\n===== 附件「${f.name}」的内容 =====\n${f.text}`).join("");
+}
+
 /* ---------- templates ---------- */
 function renderTemplates() {
   templateSelect.innerHTML = "";
@@ -311,6 +456,7 @@ function createSession() {
     role: state.settings.role,
     messages: [],
     createdAt: Date.now(),
+    pinned: false,
   };
   state.sessions.unshift(s);
   state.activeId = s.id;
@@ -447,9 +593,10 @@ function renderSessions() {
   const container = document.createElement("div");
   container.className = "sessions";
   const kw = state.searchFilter.trim().toLowerCase();
-  const list = kw
+  let list = kw
     ? state.sessions.filter((s) => (s.title || "").toLowerCase().includes(kw))
     : state.sessions;
+  list = [...list].sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0));
   if (!list.length) {
     container.innerHTML = '<p class="hint">无匹配会话</p>';
   }
@@ -457,13 +604,15 @@ function renderSessions() {
     const item = document.createElement("div");
     item.className = "session-item" + (s.id === state.activeId ? " active" : "");
     item.innerHTML = `
-      <span class="session-title-text">${escapeHtml(s.title || "新会话")}</span>
+      <span class="session-title-text">${s.pinned ? "📌 " : ""}${escapeHtml(s.title || "新会话")}</span>
       <span class="session-actions">
+        <button class="mini" data-act="pin" title="${s.pinned ? "取消置顶" : "置顶"}">${s.pinned ? "★" : "☆"}</button>
         <button class="mini" data-act="rename" title="重命名">✎</button>
         <button class="mini danger" data-act="delete" title="删除">🗑</button>
       </span>`;
     item.onclick = (e) => {
       const act = e.target.closest("button")?.dataset.act;
+      if (act === "pin") { e.stopPropagation(); s.pinned = !s.pinned; saveSessions(); renderSessions(); return; }
       if (act === "rename") { e.stopPropagation(); renameSession(s.id); return; }
       if (act === "delete") { e.stopPropagation(); deleteSession(s.id); return; }
       switchSession(s.id);
@@ -524,7 +673,7 @@ function renderMessages() {
     return;
   }
   welcomeEl.style.display = "none";
-  msgs.forEach((m) => appendMessageDom(m.role, m.content, m.error, m.time, false));
+  msgs.forEach((m) => appendMessageDom(m.role, m.content, m.error, m.time, false, m.reasoning));
   messagesEl.scrollTop = messagesEl.scrollHeight;
 }
 
@@ -536,7 +685,7 @@ function fmtTime(ts) {
   return `${hh}:${mm}`;
 }
 
-function appendMessageDom(role, content, error, ts, streaming) {
+function appendMessageDom(role, content, error, ts, streaming, reasoning) {
   const row = document.createElement("div");
   row.className = `message ${role}`;
   const avatar = role === "user" ? "👤" : "🧭";
@@ -551,6 +700,8 @@ function appendMessageDom(role, content, error, ts, streaming) {
     </div>`;
   const bubble = row.querySelector(".bubble");
   const actions = row.querySelector(".msg-actions");
+
+  if (reasoning) renderReasoning(row, reasoning);
 
   if (streaming) {
     renderBubble(bubble, content, true);
@@ -592,9 +743,74 @@ function renderBubble(el, text, streaming) {
         pre.appendChild(copyBtn);
       }
     });
+    renderMathIn(el);
+    if (!streaming) renderMermaidIn(el);
   } else {
     el.textContent = text;
   }
+}
+
+function renderMathIn(el) {
+  if (!window.katex) return;
+  el.querySelectorAll("pre code.language-math, code.language-math").forEach((block) => {
+    const container = document.createElement("div");
+    container.className = "katex-block";
+    try {
+      window.katex.render(block.textContent, container, { displayMode: true, throwOnError: false });
+      block.parentElement.replaceWith(container);
+    } catch (e) { /* keep raw */ }
+  });
+  el.innerHTML = el.innerHTML.replace(/\$\$(.+?)\$\$/g, (m, expr) => {
+    try {
+      return window.katex.renderToString(expr, { displayMode: true, throwOnError: false });
+    } catch (e) { return m; }
+  });
+  el.innerHTML = el.innerHTML.replace(/(?<!\$)\$([^$\n]{1,80})\$/g, (m, expr) => {
+    try {
+      return window.katex.renderToString(expr, { displayMode: false, throwOnError: false });
+    } catch (e) { return m; }
+  });
+}
+
+async function renderMermaidIn(el) {
+  if (!window.mermaid) return;
+  const blocks = [...el.querySelectorAll("pre code.language-mermaid")];
+  if (!blocks.length) return;
+  for (const block of blocks) {
+    const pre = block.parentElement;
+    const container = document.createElement("div");
+    container.className = "mermaid";
+    container.textContent = block.textContent;
+    pre.replaceWith(container);
+  }
+  try {
+    await window.mermaid.run({ nodes: [...el.querySelectorAll(".mermaid")] });
+  } catch (e) {
+    el.querySelectorAll(".mermaid").forEach((n) => {
+      n.innerHTML = `<pre>${escapeHtml(n.textContent)}</pre>`;
+    });
+  }
+}
+
+function renderReasoning(row, text) {
+  let box = row.querySelector(".reasoning-box");
+  if (!box) {
+    box = document.createElement("div");
+    box.className = "reasoning-box";
+    row.querySelector(".msg-body").insertBefore(box, row.querySelector(".bubble"));
+    const head = document.createElement("div");
+    head.className = "reasoning-head";
+    head.textContent = "💭 思考过程";
+    head.onclick = () => {
+      const body = box.querySelector(".reasoning-body");
+      body.style.display = body.style.display === "none" ? "block" : "none";
+    };
+    box.appendChild(head);
+    const body = document.createElement("div");
+    body.className = "reasoning-body";
+    box.appendChild(body);
+  }
+  box.querySelector(".reasoning-body").textContent = text;
 }
 
 function escapeHtml(s) {
@@ -677,7 +893,11 @@ function appendCommandReply(text) {
 /* ---------- chat ---------- */
 async function submit() {
   const text = input.value.trim();
-  if (!text || state.streaming) return;
+  if (!text && !state.pendingFiles.length) return;
+  if (state.streaming) return;
+
+  const content = text + pendingFilesContent();
+  const cleanText = text || "[附件]";
 
   if (text.startsWith("/") && handleCommand(text)) {
     input.value = "";
@@ -686,13 +906,15 @@ async function submit() {
   }
 
   const s = getActive();
-  s.messages.push({ role: "user", content: text, time: Date.now() });
-  if (s.title === "新会话") s.title = text.slice(0, 20);
+  s.messages.push({ role: "user", content, time: Date.now() });
+  if (s.title === "新会话") s.title = cleanText.slice(0, 20);
   sessionTitleEl.textContent = s.title;
   saveSessions();
   renderSessions();
-  appendMessageDom("user", text, false, Date.now(), false);
+  appendMessageDom("user", content, false, Date.now(), false);
   input.value = "";
+  state.pendingFiles = [];
+  renderAttachChip();
   autoResize();
   welcomeEl.style.display = "none";
 
@@ -744,6 +966,10 @@ async function sendToLLM(s) {
         kb_context: kbCtx,
         temperature: parseFloat(state.settings.temperature) || 0.7,
         max_tokens: state.settings.maxTokens ? parseInt(state.settings.maxTokens) : null,
+        top_p: state.settings.topP != null ? parseFloat(state.settings.topP) : 1,
+        frequency_penalty: state.settings.frequencyPenalty != null ? parseFloat(state.settings.frequencyPenalty) : 0,
+        presence_penalty: state.settings.presencePenalty != null ? parseFloat(state.settings.presencePenalty) : 0,
+        stream_reasoning: !!state.settings.streamReasoning,
       }),
       signal: controller.signal,
     });
@@ -756,6 +982,7 @@ async function sendToLLM(s) {
     const reader = res.body.getReader();
     const decoder = new TextDecoder("utf-8");
     let buffer = "";
+    let reasoning = "";
 
     while (true) {
       const { done, value } = await reader.read();
@@ -769,9 +996,15 @@ async function sendToLLM(s) {
         if (payload === "[DONE]") continue;
         const data = JSON.parse(payload);
         if (data.error) throw new Error(data.error);
-        full += data.delta || "";
-        renderBubble(bubble, full, true);
-        messagesEl.scrollTop = messagesEl.scrollHeight;
+        if (data.reasoning) {
+          reasoning += data.reasoning;
+          renderReasoning(row, reasoning);
+        }
+        if (data.delta) {
+          full += data.delta;
+          renderBubble(bubble, full, true);
+          messagesEl.scrollTop = messagesEl.scrollHeight;
+        }
       }
     }
   } catch (e) {
@@ -786,7 +1019,9 @@ async function sendToLLM(s) {
     stopBtn.classList.add("hidden");
     form.classList.remove("streaming");
     if (full) {
-      s.messages.push({ role: "assistant", content: full, time: Date.now() });
+      const msg = { role: "assistant", content: full, time: Date.now() };
+      if (reasoning) msg.reasoning = reasoning;
+      s.messages.push(msg);
       saveSessions();
       renderMessages();
     } else {
@@ -821,15 +1056,118 @@ $("#restoreBtn").addEventListener("click", () => {
   inp.click();
 });
 
+/* ---------- export HTML ---------- */
+function exportHtml() {
+  const s = getActive();
+  if (!s.messages.length) return toast("当前会话没有消息");
+  const theme = document.documentElement.dataset.theme === "dark";
+  const parts = [`<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><title>${s.title}</title>`,
+    `<style>body{font-family:'Segoe UI','Microsoft YaHei',sans-serif;max-width:900px;margin:0 auto;padding:24px;background:${theme ? "#0f172a" : "#fff"};color:${theme ? "#e2e8f0" : "#1b2b3d"};line-height:1.7}.msg{margin:16px 0;padding:14px 18px;border-radius:12px}.user{background:${theme ? "#1e293b" : "#eef4ff"}}.assistant{background:${theme ? "#1e3a5f" : "#f8fafc"}}pre{background:${theme ? "#0b1220" : "#f7f9fc"};padding:12px;border-radius:8px;overflow:auto}code{font-family:Consolas,monospace}</style></head><body>`];
+  parts.push(`<h1>${s.title}</h1>`);
+  parts.push(`<p><small>导出时间：${new Date().toLocaleString("zh-CN")} · 角色：${state.roles[s.role]?.name || s.role}</small></p>`);
+  s.messages.forEach((m) => {
+    const cls = m.role === "user" ? "user" : "assistant";
+    parts.push(`<div class="msg ${cls}">${marked.parse(m.content || "")}</div>`);
+  });
+  parts.push("</body></html>");
+  downloadText(`${s.title || "session"}.html`, parts.join("\n"), "text/html;charset=utf-8");
+  toast("已导出 HTML");
+}
+
+/* ---------- message search within session ---------- */
+function toggleMsgSearch() {
+  const bar = $("#msgSearchBar");
+  const hidden = bar.classList.contains("hidden");
+  if (hidden) {
+    bar.classList.remove("hidden");
+    $("#msgSearchInput").focus();
+  } else {
+    bar.classList.add("hidden");
+    clearMsgHighlight();
+  }
+}
+function clearMsgHighlight() {
+  document.querySelectorAll(".msg-search-hl").forEach((el) => {
+    const p = el.parentElement;
+    p.textContent = p.textContent;
+    p.replaceWith(...p.childNodes);
+  });
+}
+$("#msgSearchClose").addEventListener("click", () => {
+  $("#msgSearchBar").classList.add("hidden");
+  $("#msgSearchInput").value = "";
+  clearMsgHighlight();
+});
+let msgSearchTimer = null;
+$("#msgSearchInput").addEventListener("input", () => {
+  clearTimeout(msgSearchTimer);
+  msgSearchTimer = setTimeout(() => {
+    const kw = $("#msgSearchInput").value.trim().toLowerCase();
+    if (!kw) { clearMsgHighlight(); $("#msgSearchCount").textContent = ""; return; }
+    const s = getActive();
+    let count = 0;
+    s.messages.forEach((m) => {
+      if ((m.content || "").toLowerCase().includes(kw)) count++;
+    });
+    $("#msgSearchCount").textContent = `${count} 条匹配`;
+  }, 250);
+});
+
+/* ---------- shortcuts ---------- */
+document.addEventListener("keydown", (e) => {
+  const mod = e.ctrlKey || e.metaKey;
+  if (mod && e.key.toLowerCase() === "n") { e.preventDefault(); createSession(); input.focus(); }
+  else if (mod && e.shiftKey && e.key.toLowerCase() === "e") { e.preventDefault(); exportHtml(); }
+  else if (mod && e.shiftKey && e.key.toLowerCase() === "f") { e.preventDefault(); toggleMsgSearch(); }
+});
+
 $("#settingsBtn").addEventListener("click", () => {
   $("#setBaseUrl").value = state.settings.baseUrl;
   $("#setApiKey").value = state.settings.apiKey;
   $("#setModel").value = state.settings.model;
   $("#setTemperature").value = state.settings.temperature;
+  $("#setTopP").value = state.settings.topP != null ? state.settings.topP : 1;
   $("#setMaxTokens").value = state.settings.maxTokens || "";
+  $("#setFreqPenalty").value = state.settings.frequencyPenalty != null ? state.settings.frequencyPenalty : 0;
+  $("#setPresencePenalty").value = state.settings.presencePenalty != null ? state.settings.presencePenalty : 0;
   $("#setKbTopK").value = state.settings.kbTopK || 3;
+  $("#setStreamReasoning").checked = !!state.settings.streamReasoning;
   $("#setSystemPrompt").value = state.settings.systemPrompt;
+  renderProviders();
   $("#settingsModal").classList.remove("hidden");
+});
+$("#providerSelect").addEventListener("change", (e) => {
+  applyProvider(e.target.value);
+});
+$("#saveProviderBtn").addEventListener("click", () => {
+  const name = prompt("为此接口配置命名，例如：DeepSeek 官方 / 公司网关");
+  if (!name) return;
+  const id = "p" + Date.now() + Math.random().toString(16).slice(2, 4);
+  const p = {
+    id,
+    name,
+    baseUrl: $("#setBaseUrl").value.trim(),
+    apiKey: $("#setApiKey").value.trim(),
+    model: $("#setModel").value.trim(),
+  };
+  if (!p.baseUrl && !p.apiKey && !p.model) return toast("配置为空，无法保存");
+  state.providers.push(p);
+  state.activeProviderId = id;
+  safeSet(PROVIDERS_KEY + ".active", id);
+  saveProviders();
+  renderProviders();
+  toast(`已保存配置「${name}」`);
+});
+$("#delProviderBtn").addEventListener("click", () => {
+  const id = $("#providerSelect").value;
+  if (!id || id === "manual") return toast("请选择要删除的配置");
+  const p = state.providers.find((x) => x.id === id);
+  if (!confirm(`删除配置「${p.name}」？`)) return;
+  state.providers = state.providers.filter((x) => x.id !== id);
+  if (state.activeProviderId === id) { state.activeProviderId = null; safeSet(PROVIDERS_KEY + ".active", ""); }
+  saveProviders();
+  renderProviders();
+  toast("已删除配置");
 });
 $("#modalClose").addEventListener("click", () => $("#settingsModal").classList.add("hidden"));
 $("#modalCancel").addEventListener("click", () => $("#settingsModal").classList.add("hidden"));
@@ -838,8 +1176,12 @@ $("#modalSave").addEventListener("click", () => {
   state.settings.apiKey = $("#setApiKey").value.trim();
   state.settings.model = $("#setModel").value.trim();
   state.settings.temperature = $("#setTemperature").value || 0.7;
+  state.settings.topP = $("#setTopP").value || 1;
   state.settings.maxTokens = $("#setMaxTokens").value || null;
+  state.settings.frequencyPenalty = $("#setFreqPenalty").value || 0;
+  state.settings.presencePenalty = $("#setPresencePenalty").value || 0;
   state.settings.kbTopK = $("#setKbTopK").value || 3;
+  state.settings.streamReasoning = $("#setStreamReasoning").checked;
   state.settings.systemPrompt = $("#setSystemPrompt").value.trim();
   saveSettings();
   $("#settingsModal").classList.add("hidden");
@@ -906,6 +1248,7 @@ async function fetchSettings() {
 initTheme();
 loadSessions();
 loadSettings();
+loadProviders();
 loadKb();
 renderKb();
 renderTemplates();

@@ -73,6 +73,11 @@
       </header>
 
       <div id="sessionTitle" class="session-title"></div>
+      <div class="msg-search-bar hidden" id="msgSearchBar">
+        <input type="text" id="msgSearchInput" placeholder="🔍 搜索本会话消息…" />
+        <button class="mini" id="msgSearchClose">✕</button>
+        <span class="msg-search-count" id="msgSearchCount"></span>
+      </div>
 
       <div id="messages"></div>
 
@@ -86,13 +91,16 @@
       </div>
 
       <form id="chatForm">
+        <div class="attach-chip hidden" id="attachChip"></div>
         <div class="input-wrap">
+          <button type="button" id="attachBtn" class="icon-btn" title="上传文件到对话">📎</button>
+          <input type="file" id="attachInput" multiple hidden />
           <textarea id="input" placeholder="输入问题，或输入 / 查看命令。Enter 发送，Shift+Enter 换行…" rows="1"></textarea>
           <button type="submit" id="sendBtn" class="btn primary round">发送</button>
           <button type="button" id="stopBtn" class="btn danger round hidden">停止</button>
         </div>
         <div class="form-footer">
-          <span class="hint">Enter 发送 · Shift+Enter 换行 · 支持 Markdown · 支持知识库检索</span>
+          <span class="hint">Enter 发送 · Shift+Enter 换行 · 支持 Markdown · 支持文件/知识库</span>
         </div>
       </form>
     </main>
@@ -104,6 +112,14 @@
         <h2>接口与参数设置</h2>
         <button class="icon-btn" id="modalClose">✕</button>
       </div>
+
+      <label>已保存接口配置</label>
+      <div class="provider-bar">
+        <select id="providerSelect" class="template-select"></select>
+        <button type="button" id="saveProviderBtn" class="btn ghost small" title="保存当前配置">＋</button>
+        <button type="button" id="delProviderBtn" class="btn ghost small" title="删除选中配置">🗑</button>
+      </div>
+
       <label>Base URL</label>
       <input type="text" id="setBaseUrl" placeholder="https://api.openai.com/v1" />
       <label>API Key</label>
@@ -112,10 +128,31 @@
       <input type="text" id="setModel" placeholder="gpt-4o-mini" />
       <label>温度（0~2，越高越发散）</label>
       <input type="number" id="setTemperature" min="0" max="2" step="0.1" value="0.7" />
-      <label>最大输出 Tokens（留空不限）</label>
-      <input type="number" id="setMaxTokens" min="1" placeholder="留空不限" />
-      <label>知识库注入片段数（每次提问最多注入几段，越多越占 token）</label>
+      <div class="param-row">
+        <div>
+          <label>Top-P（0~1）</label>
+          <input type="number" id="setTopP" min="0" max="1" step="0.05" value="1" />
+        </div>
+        <div>
+          <label>最大输出 Tokens</label>
+          <input type="number" id="setMaxTokens" min="1" placeholder="留空不限" />
+        </div>
+      </div>
+      <div class="param-row">
+        <div>
+          <label>频率惩罚（-2~2）</label>
+          <input type="number" id="setFreqPenalty" min="-2" max="2" step="0.1" value="0" />
+        </div>
+        <div>
+          <label>存在惩罚（-2~2）</label>
+          <input type="number" id="setPresencePenalty" min="-2" max="2" step="0.1" value="0" />
+        </div>
+      </div>
+      <label>知识库注入片段数（每次提问最多注入几段）</label>
       <input type="number" id="setKbTopK" min="1" max="10" value="3" />
+      <label class="check-row">
+        <input type="checkbox" id="setStreamReasoning" /> 显示思维链（推理过程，DeepSeek-R1 等模型支持）
+      </label>
       <label>自定义系统提示词（覆盖角色模式）</label>
       <textarea id="setSystemPrompt" rows="4" placeholder="可粘贴你的专属 prompt…"></textarea>
       <p class="hint">API Key 仅保存在浏览器本地，留空则使用服务端 .env 配置。</p>
