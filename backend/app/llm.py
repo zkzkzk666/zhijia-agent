@@ -13,6 +13,7 @@ async def stream_chat(
     model: str | None = None,
     role: str = "general",
     system_prompt: str | None = None,
+    kb_context: str | None = None,
     temperature: float = 0.7,
     max_tokens: int | None = None,
 ) -> AsyncIterator[str]:
@@ -20,8 +21,11 @@ async def stream_chat(
         base_url=base_url or settings.llm_base_url,
         api_key=api_key or settings.llm_api_key,
     )
+    system = build_system_prompt(role, system_prompt)
+    if kb_context:
+        system += "\n\n" + kb_context
     payload = [
-        {"role": "system", "content": build_system_prompt(role, system_prompt)}
+        {"role": "system", "content": system}
     ] + messages
 
     kwargs = dict(

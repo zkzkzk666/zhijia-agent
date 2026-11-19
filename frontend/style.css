@@ -175,6 +175,59 @@ html[data-theme="dark"] .btn.danger { background: #7f1d1d; color: #fecaca; borde
 }
 .topic-chip:hover { background: var(--accent-soft); border-color: var(--accent); transform: translateY(-1px); }
 
+/* Search */
+.search-wrap { margin-bottom: 16px; }
+.search-wrap input {
+  width: 100%;
+  background: var(--bg-card-hover);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 9px 12px;
+  font-size: 13px;
+  outline: none;
+  transition: border-color .2s;
+}
+.search-wrap input:focus { border-color: var(--accent); }
+
+/* Knowledge base */
+.kb-list { display: flex; flex-direction: column; gap: 5px; margin-bottom: 8px; }
+.kb-item {
+  display: flex; align-items: center; gap: 8px;
+  background: var(--bg-card-hover);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 7px 10px;
+  font-size: 12px;
+}
+.kb-item input[type="checkbox"] { accent-color: var(--accent); width: 14px; height: 14px; cursor: pointer; }
+.kb-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kb-size { color: var(--text-dim); font-size: 11px; flex-shrink: 0; }
+.kb-hint { margin-top: 6px; }
+.kb-count { font-size: 11px; color: var(--text-dim); font-weight: 400; }
+
+.upload-btn { display: inline-flex; align-items: center; justify-content: center; cursor: pointer; font-weight: 500; }
+.upload-btn input { display: none; }
+
+/* Template select */
+.template-select {
+  width: 100%;
+  background: var(--bg-card-hover);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 9px 12px;
+  font-size: 13px;
+  outline: none;
+  cursor: pointer;
+}
+.template-select:focus { border-color: var(--accent); }
+
+/* Footer stats & backup */
+.footer-stats { font-size: 12px; color: var(--text-dim); margin-bottom: 10px; }
+.footer-btns { display: flex; gap: 8px; margin-bottom: 10px; }
+.btn.half { flex: 1; padding: 9px 8px; font-size: 13px; margin-bottom: 0; }
+
 .sidebar-footer { margin-top: auto; }
 
 /* ============ Main ============ */

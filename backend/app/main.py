@@ -36,6 +36,7 @@ class ChatRequest(BaseModel):
     model: str | None = None
     role: str = "general"
     system_prompt: str | None = None
+    kb_context: str | None = None
     temperature: float = 0.7
     max_tokens: int | None = None
 
@@ -84,6 +85,7 @@ async def chat(req: ChatRequest):
                 model=req.model,
                 role=req.role,
                 system_prompt=req.system_prompt,
+                kb_context=req.kb_context,
                 temperature=req.temperature,
                 max_tokens=req.max_tokens,
             ):

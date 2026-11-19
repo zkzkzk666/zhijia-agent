@@ -19,6 +19,25 @@
 
       <button id="newChatBtn" class="btn primary full">＋ 新建会话</button>
 
+      <div class="search-wrap">
+        <input type="text" id="sessionSearch" placeholder="🔍 搜索会话…" />
+      </div>
+
+      <div class="sidebar-section">
+        <h2 class="section-title">📚 知识库 <span class="kb-count" id="kbCount"></span></h2>
+        <div id="kbList" class="kb-list"></div>
+        <label class="upload-btn btn ghost full">
+          ＋ 上传文件（.txt / .md）
+          <input type="file" id="kbFileInput" accept=".txt,.md,.markdown,text/plain,text/markdown" multiple hidden />
+        </label>
+        <p class="hint kb-hint">提问时自动检索相关片段并注入上下文</p>
+      </div>
+
+      <div class="sidebar-section">
+        <h2 class="section-title">🛠️ 提示词模板</h2>
+        <select id="templateSelect" class="template-select"></select>
+      </div>
+
       <div class="sidebar-section">
         <h2 class="section-title">角色模式</h2>
         <div id="roleList" class="role-list"></div>
@@ -30,6 +49,11 @@
       </div>
 
       <div class="sidebar-footer">
+        <div class="footer-stats" id="statsLine"></div>
+        <div class="footer-btns">
+          <button id="backupBtn" class="btn ghost half">💾 备份</button>
+          <button id="restoreBtn" class="btn ghost half">📂 恢复</button>
+        </div>
         <button id="settingsBtn" class="btn ghost full">⚙️ 接口与参数设置</button>
       </div>
     </aside>
@@ -56,19 +80,19 @@
         <div class="welcome-hero">
           <div class="welcome-icon">🧭</div>
           <h2>你好，我是智驾辅助 Agent</h2>
-          <p>选择角色模式，或直接输入问题。可覆盖感知、融合、规控、测试、功能安全等智驾领域。</p>
+          <p>选择角色模式、加载知识库，或直接输入问题。输入 <code>/help</code> 查看斜杠命令。</p>
         </div>
         <div id="welcomeTopics" class="topics"></div>
       </div>
 
       <form id="chatForm">
         <div class="input-wrap">
-          <textarea id="input" placeholder="输入你的问题，Enter 发送，Shift+Enter 换行…" rows="1"></textarea>
+          <textarea id="input" placeholder="输入问题，或输入 / 查看命令。Enter 发送，Shift+Enter 换行…" rows="1"></textarea>
           <button type="submit" id="sendBtn" class="btn primary round">发送</button>
           <button type="button" id="stopBtn" class="btn danger round hidden">停止</button>
         </div>
         <div class="form-footer">
-          <span class="hint">Enter 发送 · Shift+Enter 换行 · 支持 Markdown</span>
+          <span class="hint">Enter 发送 · Shift+Enter 换行 · 支持 Markdown · 支持知识库检索</span>
         </div>
       </form>
     </main>
@@ -90,6 +114,8 @@
       <input type="number" id="setTemperature" min="0" max="2" step="0.1" value="0.7" />
       <label>最大输出 Tokens（留空不限）</label>
       <input type="number" id="setMaxTokens" min="1" placeholder="留空不限" />
+      <label>知识库注入片段数（每次提问最多注入几段，越多越占 token）</label>
+      <input type="number" id="setKbTopK" min="1" max="10" value="3" />
       <label>自定义系统提示词（覆盖角色模式）</label>
       <textarea id="setSystemPrompt" rows="4" placeholder="可粘贴你的专属 prompt…"></textarea>
       <p class="hint">API Key 仅保存在浏览器本地，留空则使用服务端 .env 配置。</p>
