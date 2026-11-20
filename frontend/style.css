@@ -254,6 +254,14 @@ html[data-theme="dark"] .btn.danger { background: #7f1d1d; color: #fecaca; borde
   transition: all .15s;
 }
 .icon-btn:hover { border-color: var(--accent); color: var(--text); transform: translateY(-1px); }
+.icon-btn.active { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+.icon-btn.listening { border-color: var(--danger); color: var(--danger); animation: pulse 1s infinite; }
+@keyframes pulse { 50% { opacity: .5; } }
+
+/* template bar */
+.template-bar { display: flex; gap: 6px; }
+.template-bar .template-select { flex: 1; }
+.tmpl-list { display: flex; flex-direction: column; gap: 5px; margin-top: 8px; }
 
 #modelSelect {
   background: var(--bg-card);

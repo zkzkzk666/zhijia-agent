@@ -9,7 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from .config import settings
-from .llm import stream_chat
+from .llm import stream_chat, summarize_messages, web_search
 from .prompt import PRESET_TOPICS, ROLES
 
 app = FastAPI(title="智驾辅助 Agent")
@@ -32,6 +32,12 @@ class ChatMessage(BaseModel):
     content: str
 
 
+class ImageAttachment(BaseModel):
+    name: str = "image"
+    mime: str = "image/png"
+    b64: str = ""
+
+
 class ChatRequest(BaseModel):
     messages: list[ChatMessage]
     base_url: str | None = None
@@ -40,6 +46,9 @@ class ChatRequest(BaseModel):
     role: str = "general"
     system_prompt: str | None = None
     kb_context: str | None = None
+    search_context: str | None = None
+    summary_context: str | None = None
+    images: list[ImageAttachment] = []
     temperature: float = 0.7
     max_tokens: int | None = None
     top_p: float | None = None
@@ -124,6 +133,38 @@ async def extract(file: UploadFile):
     return {"filename": filename, "ext": ext, "text": text[:300000], "chars": len(text)}
 
 
+@app.get("/api/search")
+async def search(q: str, max_results: int = 5) -> dict:
+    if not q.strip():
+        raise HTTPException(status_code=400, detail="q 不能为空")
+    try:
+        results = await web_search(q, max_results)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"搜索失败：{e}")
+    if not results:
+        return {"query": q, "results": [], "note": "未获取到结果，可能是网络受限"}
+    return {"query": q, "results": results}
+
+
+@app.post("/api/summarize")
+async def summarize(req: ChatRequest):
+    messages = [m.model_dump() for m in req.messages]
+    if not messages:
+        raise HTTPException(status_code=400, detail="messages 不能为空")
+    if not (req.api_key or settings.llm_api_key):
+        raise HTTPException(status_code=400, detail="LLM API Key 未配置")
+    try:
+        summary = await summarize_messages(
+            messages,
+            base_url=req.base_url,
+            api_key=req.api_key,
+            model=req.model,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"摘要失败：{e}")
+    return {"summary": summary}
+
+
 @app.post("/api/chat")
 async def chat(req: ChatRequest):
     messages = [m.model_dump() for m in req.messages]
@@ -132,6 +173,24 @@ async def chat(req: ChatRequest):
 
     if not (req.api_key or settings.llm_api_key):
         raise HTTPException(status_code=400, detail="LLM API Key 未配置")
+
+    # 多模态：把图片附加到最后一条用户消息
+    if req.images:
+        parts = [{"type": "text", "text": messages[-1]["content"]}]
+        for img in req.images:
+            parts.append({
+                "type": "image_url",
+                "image_url": {"url": f"data:{img.mime};base64,{img.b64}"},
+            })
+        messages[-1] = {"role": "user", "content": parts}
+
+    # 合并上下文：知识库 + 联网搜索 + 历史摘要
+    extra = []
+    if req.search_context:
+        extra.append(req.search_context)
+    if req.summary_context:
+        extra.append(req.summary_context)
+    extra_ctx = "\n\n".join(extra)
 
     async def event_stream():
         try:
@@ -143,6 +202,7 @@ async def chat(req: ChatRequest):
                 role=req.role,
                 system_prompt=req.system_prompt,
                 kb_context=req.kb_context,
+                summary_context=extra_ctx or None,
                 temperature=req.temperature,
                 max_tokens=req.max_tokens,
                 top_p=req.top_p,

@@ -23,6 +23,7 @@ const SETTINGS_KEY = "zj.settings.v2";
 const THEME_KEY = "zj.theme";
 const KB_KEY = "zj.kb.v1";
 const PROVIDERS_KEY = "zj.providers.v1";
+const CUSTOM_TMPL_KEY = "zj.customTemplates.v1";
 
 const state = {
   sessions: [],
@@ -41,15 +42,19 @@ const state = {
     kbTopK: 3,
     templateId: "none",
     streamReasoning: false,
+    style: "",
   },
   providers: [],
   activeProviderId: null,
   roles: {},
   presetTopics: [],
   templates: [],
+  customTemplates: [],
   kb: [],
   searchFilter: "",
   pendingFiles: [],
+  pendingImages: [],
+  webSearchOn: false,
   streaming: false,
   abort: null,
 };
@@ -194,6 +199,69 @@ function initTheme() {
   applyTheme(saved || (prefersDark ? "dark" : "light"));
 }
 
+themeToggle.addEventListener("click", () => {
+  applyTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark");
+});
+
+/* ---------- web search toggle ---------- */
+const searchToggle = $("#searchToggle");
+searchToggle.addEventListener("click", () => {
+  state.webSearchOn = !state.webSearchOn;
+  searchToggle.classList.toggle("active", state.webSearchOn);
+  searchToggle.title = state.webSearchOn ? "关闭联网搜索" : "开启联网搜索";
+  toast(state.webSearchOn ? "已开启联网搜索 🌐" : "已关闭联网搜索");
+  updateSearchStyle();
+});
+function updateSearchStyle() {
+  searchToggle.style.borderColor = state.webSearchOn ? "var(--accent)" : "";
+  searchToggle.style.color = state.webSearchOn ? "var(--accent)" : "";
+}
+
+/* ---------- voice input ---------- */
+let recognition = null;
+let voiceListening = false;
+const voiceBtn = $("#voiceBtn");
+const formHint = $("#formHint");
+if ("webkitSpeechRecognition" in window || "SpeechRecognition" in window) {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  recognition = new SR();
+  recognition.lang = "zh-CN";
+  recognition.interimResults = true;
+  recognition.continuous = false;
+  recognition.onresult = (e) => {
+    let interim = "";
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      const t = e.results[i][0].transcript;
+      if (e.results[i].isFinal) input.value += t;
+      else interim += t;
+    }
+    formHint.textContent = interim ? `正在听：${interim}…` : "语音输入：点击 🎤 开始/停止";
+    autoResize();
+  };
+  recognition.onend = () => {
+    voiceListening = false;
+    voiceBtn.classList.remove("listening");
+    formHint.textContent = "Enter 发送 · Shift+Enter 换行 · 支持 Markdown / 文件 / 知识库";
+  };
+  recognition.onerror = () => {
+    voiceListening = false;
+    voiceBtn.classList.remove("listening");
+    toast("语音识别出错");
+  };
+  voiceBtn.addEventListener("click", () => {
+    if (voiceListening) { recognition.stop(); return; }
+    try {
+      recognition.start();
+      voiceListening = true;
+      voiceBtn.classList.add("listening");
+      toast("请说话…");
+    } catch (e) { toast("语音不可用（需 Chrome/Edge）"); }
+  });
+} else {
+  voiceBtn.disabled = true;
+  voiceBtn.title = "当前浏览器不支持语音输入";
+}
+
 /* ---------- persistence ---------- */
 function loadSessions() {
   try {
@@ -238,6 +306,14 @@ function loadProviders() {
   }
 }
 function saveProviders() { safeSet(PROVIDERS_KEY, JSON.stringify(state.providers)); }
+
+function loadCustomTemplates() {
+  try {
+    const raw = safeGet(CUSTOM_TMPL_KEY);
+    if (raw) state.customTemplates = JSON.parse(raw);
+  } catch (e) { state.customTemplates = []; }
+}
+function saveCustomTemplates() { safeSet(CUSTOM_TMPL_KEY, JSON.stringify(state.customTemplates)); }
 
 function renderProviders() {
   const sel = $("#providerSelect");
@@ -374,6 +450,16 @@ attachInput.addEventListener("change", async () => {
   const files = [...attachInput.files];
   attachInput.value = "";
   for (const file of files) {
+    if (file.type.startsWith("image/")) {
+      try {
+        const b64 = await readFileAsBase64(file);
+        state.pendingImages.push({ name: file.name, mime: file.type || "image/png", b64 });
+        toast(`已加载图片「${file.name}」`);
+      } catch (e) {
+        toast(`「${file.name}」读取失败`);
+      }
+      continue;
+    }
     try {
       const fd = new FormData();
       fd.append("file", file);
@@ -389,26 +475,53 @@ attachInput.addEventListener("change", async () => {
   renderAttachChip();
 });
 
+function readFileAsBase64(file) {
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => {
+      const s = String(fr.result);
+      const b64 = s.split(",")[1] || "";
+      resolve(b64);
+    };
+    fr.onerror = reject;
+    fr.readAsDataURL(file);
+  });
+}
+
 function renderAttachChip() {
-  if (!state.pendingFiles.length) {
+  const items = [];
+  state.pendingFiles.forEach((f, i) => {
+    items.push(`
+      <span class="attach-item">
+        📎 ${escapeHtml(f.name)}
+        <button class="mini" data-idx="${i}" data-act="tokb" title="加入知识库">＋KB</button>
+        <button class="mini danger" data-idx="${i}" data-act="removefile" title="移除">✕</button>
+      </span>`);
+  });
+  state.pendingImages.forEach((img, i) => {
+    const idx = state.pendingFiles.length + i;
+    items.push(`
+      <span class="attach-item">
+        🖼 ${escapeHtml(img.name)}
+        <button class="mini danger" data-idx="${idx}" data-act="removeimg" title="移除">✕</button>
+      </span>`);
+  });
+  if (!items.length) {
     attachChip.classList.add("hidden");
     attachChip.innerHTML = "";
     return;
   }
   attachChip.classList.remove("hidden");
-  attachChip.innerHTML = state.pendingFiles.map((f, i) => `
-    <span class="attach-item">
-      📎 ${escapeHtml(f.name)}
-      <button class="mini" data-idx="${i}" data-act="tokb" title="加入知识库">＋KB</button>
-      <button class="mini danger" data-idx="${i}" data-act="remove" title="移除">✕</button>
-    </span>`).join("");
+  attachChip.innerHTML = items.join("");
   attachChip.querySelectorAll("button").forEach((btn) => {
     btn.onclick = () => {
       const i = parseInt(btn.dataset.idx);
-      const f = state.pendingFiles[i];
-      if (btn.dataset.act === "remove") {
+      if (btn.dataset.act === "removefile") {
         state.pendingFiles.splice(i, 1);
+      } else if (btn.dataset.act === "removeimg") {
+        state.pendingImages.splice(i - state.pendingFiles.length, 1);
       } else if (btn.dataset.act === "tokb") {
+        const f = state.pendingFiles[i];
         const chunks = chunkText(f.text);
         state.kb.push({ name: f.name, enabled: true, chunks, size: f.text.length });
         state.pendingFiles.splice(i, 1);
@@ -428,25 +541,83 @@ function pendingFilesContent() {
 /* ---------- templates ---------- */
 function renderTemplates() {
   templateSelect.innerHTML = "";
-  TEMPLATES.forEach((t) => {
+  const all = [
+    { id: "none", name: "不使用模板" },
+    ...TEMPLATES.map((t) => ({ id: "t:" + t.id, name: t.name })),
+    ...state.customTemplates.map((t) => ({ id: "c:" + t.id, name: "⭐ " + t.name })),
+  ];
+  all.forEach((o) => {
     const opt = document.createElement("option");
-    opt.value = t.id;
-    opt.textContent = t.name;
+    opt.value = o.id;
+    opt.textContent = o.name;
     templateSelect.appendChild(opt);
   });
   templateSelect.value = state.settings.templateId || "none";
 }
+
+function renderCustomTmplList() {
+  const el = $("#customTmplList");
+  el.innerHTML = "";
+  if (!state.customTemplates.length) {
+    el.innerHTML = '<p class="hint">暂无自定义模板</p>';
+    return;
+  }
+  state.customTemplates.forEach((t, i) => {
+    const row = document.createElement("div");
+    row.className = "kb-item";
+    row.innerHTML = `
+      <span class="kb-name">⭐ ${escapeHtml(t.name)}</span>
+      <button class="mini danger" data-i="${i}" title="删除">🗑</button>`;
+    row.querySelector(".mini").onclick = () => {
+      if (!confirm(`删除模板「${t.name}」？`)) return;
+      state.customTemplates.splice(i, 1);
+      saveCustomTemplates();
+      renderCustomTmplList();
+      renderTemplates();
+      toast("已删除");
+    };
+    el.appendChild(row);
+  });
+}
+
 templateSelect.addEventListener("change", () => {
   state.settings.templateId = templateSelect.value;
   saveSettings();
-  const t = TEMPLATES.find((x) => x.id === state.settings.templateId);
+  const t = findTemplate(state.settings.templateId);
   toast(t ? `已应用模板：${t.name}` : "已清除模板");
 });
 
-function activeTemplate() {
-  const id = state.settings.templateId || "none";
-  return TEMPLATES.find((x) => x.id === id) || TEMPLATES[0];
+function findTemplate(id) {
+  if (!id || id === "none") return TEMPLATES[0];
+  if (id.startsWith("c:")) {
+    const c = state.customTemplates.find((x) => "c:" + x.id === id);
+    return c ? { name: c.name, prompt: c.prompt } : TEMPLATES[0];
+  }
+  return TEMPLATES.find((x) => "t:" + x.id === id) || TEMPLATES[0];
 }
+
+function activeTemplate() {
+  return findTemplate(state.settings.templateId || "none");
+}
+
+/* ---------- custom template manager ---------- */
+$("#customTemplateBtn").addEventListener("click", () => {
+  $("#templateModal").classList.remove("hidden");
+  renderCustomTmplList();
+});
+$("#templateModalClose").addEventListener("click", () => $("#templateModal").classList.add("hidden"));
+$("#addCustomTmplBtn").addEventListener("click", () => {
+  const name = $("#customTmplName").value.trim();
+  const prompt = $("#customTmplPrompt").value.trim();
+  if (!name || !prompt) return toast("名称和内容都不能为空");
+  state.customTemplates.push({ id: "ct" + Date.now(), name, prompt });
+  saveCustomTemplates();
+  $("#customTmplName").value = "";
+  $("#customTmplPrompt").value = "";
+  renderCustomTmplList();
+  renderTemplates();
+  toast(`已保存模板「${name}」`);
+});
 
 /* ---------- sessions ---------- */
 function createSession() {
@@ -878,6 +1049,15 @@ function handleCommand(text) {
         ? "知识库文件：\n" + state.kb.map((f) => `- ${f.name}（${f.chunks.length}段，${f.enabled ? "启用" : "停用"}）`).join("\n")
         : "知识库为空，点击左侧「上传文件」导入 .txt/.md。");
       return true;
+    case "/compress":
+      compressNow();
+      return true;
+    case "/websearch":
+      state.webSearchOn = !state.webSearchOn;
+      searchToggle.classList.toggle("active", state.webSearchOn);
+      updateSearchStyle();
+      appendCommandReply(state.webSearchOn ? "已开启联网搜索 🌐" : "已关闭联网搜索");
+      return true;
     default:
       return false;
   }
@@ -893,7 +1073,7 @@ function appendCommandReply(text) {
 /* ---------- chat ---------- */
 async function submit() {
   const text = input.value.trim();
-  if (!text && !state.pendingFiles.length) return;
+  if (!text && !state.pendingFiles.length && !state.pendingImages.length) return;
   if (state.streaming) return;
 
   const content = text + pendingFilesContent();
@@ -906,6 +1086,7 @@ async function submit() {
   }
 
   const s = getActive();
+  const images = [...state.pendingImages];
   s.messages.push({ role: "user", content, time: Date.now() });
   if (s.title === "新会话") s.title = cleanText.slice(0, 20);
   sessionTitleEl.textContent = s.title;
@@ -914,11 +1095,12 @@ async function submit() {
   appendMessageDom("user", content, false, Date.now(), false);
   input.value = "";
   state.pendingFiles = [];
+  state.pendingImages = [];
   renderAttachChip();
   autoResize();
   welcomeEl.style.display = "none";
 
-  await sendToLLM(s);
+  await sendToLLM(s, images);
 }
 
 async function regenerateLast() {
@@ -928,10 +1110,10 @@ async function regenerateLast() {
   msgs.pop();
   saveSessions();
   renderMessages();
-  await sendToLLM(s);
+  await sendToLLM(s, []);
 }
 
-async function sendToLLM(s) {
+async function sendToLLM(s, images) {
   if (state.streaming) return;
   state.streaming = true;
   sendBtn.disabled = true;
@@ -947,10 +1129,36 @@ async function sendToLLM(s) {
   const lastUserMsg = [...s.messages].reverse().find((m) => m.role === "user");
   const kbCtx = lastUserMsg ? kbContextFor(lastUserMsg.content) : "";
   const template = activeTemplate();
-  const systemPrompt = [state.settings.systemPrompt, template.prompt]
+  const styleText = state.settings.style || "";
+  const systemPrompt = [state.settings.systemPrompt, template.prompt, styleText]
     .filter(Boolean)
     .join("\n\n")
     || null;
+
+  // 联网搜索
+  let searchContext = "";
+  if (state.webSearchOn && lastUserMsg) {
+    setStatus(true, "联网搜索中…");
+    try {
+      const q = (lastUserMsg.content || "").slice(0, 100);
+      const r = await fetch(`/api/search?q=${encodeURIComponent(q)}&max_results=5`);
+      const data = await r.json();
+      if (data.results && data.results.length) {
+        searchContext = "\n\n=== 以下是网络搜索结果（可能与问题相关），请参考它们并在引用时标注来源 ===\n" +
+          data.results.map((x, i) => `${i + 1}. [${x.title}](${x.url})\n${x.snippet || ""}`).join("\n");
+      } else {
+        searchContext = "\n\n（已尝试联网搜索，但未获取到可用结果）";
+      }
+    } catch (e) {
+      searchContext = "";
+    }
+  }
+
+  // 记忆压缩
+  let summaryContext = "";
+  if (s.messages.length >= 24 && s.summary) {
+    summaryContext = "\n\n=== 较早对话摘要（已压缩以节省上下文） ===\n" + s.summary;
+  }
 
   try {
     const res = await fetch("/api/chat", {
@@ -964,6 +1172,9 @@ async function sendToLLM(s) {
         role: s.role || state.settings.role || "general",
         system_prompt: systemPrompt,
         kb_context: kbCtx,
+        search_context: searchContext,
+        summary_context: summaryContext,
+        images: images || [],
         temperature: parseFloat(state.settings.temperature) || 0.7,
         max_tokens: state.settings.maxTokens ? parseInt(state.settings.maxTokens) : null,
         top_p: state.settings.topP != null ? parseFloat(state.settings.topP) : 1,
@@ -1018,16 +1229,77 @@ async function sendToLLM(s) {
     sendBtn.disabled = false;
     stopBtn.classList.add("hidden");
     form.classList.remove("streaming");
+    setStatus(true, state.webSearchOn ? "已连接（联网开启）" : "");
     if (full) {
       const msg = { role: "assistant", content: full, time: Date.now() };
       if (reasoning) msg.reasoning = reasoning;
       s.messages.push(msg);
+      maybeCompress(s);
       saveSessions();
       renderMessages();
     } else {
       row.remove();
     }
     input.focus();
+  }
+}
+
+/* ---------- memory compression ---------- */
+async function maybeCompress(s) {
+  // 当消息超过阈值且没有摘要时，压缩中间的历史
+  if (s.summary) return;
+  if (s.messages.length < 16) return;
+  const head = s.messages.slice(0, -2);
+  const tailCount = 6;
+  const toCompress = s.messages.slice(0, Math.max(0, s.messages.length - tailCount));
+  if (toCompress.length < 8) return;
+  try {
+    const res = await fetch("/api/summarize", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        messages: toCompress.map(({ role, content }) => ({ role, content })),
+        base_url: state.settings.baseUrl || null,
+        api_key: state.settings.apiKey || null,
+        model: state.settings.model || null,
+      }),
+    });
+    const data = await res.json();
+    if (data.summary) {
+      s.summary = data.summary;
+      const keep = s.messages.slice(Math.max(0, s.messages.length - tailCount));
+      s.messages = [{ role: "system", content: "(早前对话已压缩)" }, ...keep];
+      toast("对话过长，已自动压缩早期记忆 ✓");
+    }
+  } catch (e) { /* 压缩失败不阻塞 */ }
+}
+
+async function compressNow() {
+  const s = getActive();
+  if (s.messages.length < 6) return toast("对话太短，无需压缩");
+  setStatus(true, "正在压缩历史…");
+  try {
+    const res = await fetch("/api/summarize", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        messages: s.messages.slice(0, -2).map(({ role, content }) => ({ role, content })),
+        base_url: state.settings.baseUrl || null,
+        api_key: state.settings.apiKey || null,
+        model: state.settings.model || null,
+      }),
+    });
+    const data = await res.json();
+    if (!data.summary) throw new Error("无摘要返回");
+    s.summary = data.summary;
+    s.messages = [{ role: "system", content: "(早前对话已压缩)" }, ...s.messages.slice(-4)];
+    saveSessions();
+    renderMessages();
+    setStatus(true, state.webSearchOn ? "已连接（联网开启）" : "已连接");
+    toast("已压缩历史记忆 ✓");
+  } catch (e) {
+    setStatus(true, "已连接");
+    toast(`压缩失败：${e.message}`);
   }
 }
 
@@ -1132,6 +1404,7 @@ $("#settingsBtn").addEventListener("click", () => {
   $("#setPresencePenalty").value = state.settings.presencePenalty != null ? state.settings.presencePenalty : 0;
   $("#setKbTopK").value = state.settings.kbTopK || 3;
   $("#setStreamReasoning").checked = !!state.settings.streamReasoning;
+  $("#setStyle").value = state.settings.style || "";
   $("#setSystemPrompt").value = state.settings.systemPrompt;
   renderProviders();
   $("#settingsModal").classList.remove("hidden");
@@ -1182,6 +1455,7 @@ $("#modalSave").addEventListener("click", () => {
   state.settings.presencePenalty = $("#setPresencePenalty").value || 0;
   state.settings.kbTopK = $("#setKbTopK").value || 3;
   state.settings.streamReasoning = $("#setStreamReasoning").checked;
+  state.settings.style = $("#setStyle").value || "";
   state.settings.systemPrompt = $("#setSystemPrompt").value.trim();
   saveSettings();
   $("#settingsModal").classList.add("hidden");
@@ -1250,9 +1524,11 @@ loadSessions();
 loadSettings();
 loadProviders();
 loadKb();
+loadCustomTemplates();
 renderKb();
 renderTemplates();
 fetchSettings();
 renderMessages();
 input.focus();
 loadLibs().then(() => renderMessages());
+updateSearchStyle();
