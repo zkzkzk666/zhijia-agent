@@ -419,6 +419,8 @@ html[data-theme="dark"] .btn.danger { background: #7f1d1d; color: #fecaca; borde
 }
 .msg-search-bar input:focus { border-color: var(--accent); }
 .msg-search-count { font-size: 12px; color: var(--text-dim); }
+.msg-search-hl { background: #fde047; color: #1b2b3d; border-radius: 3px; padding: 0 2px; }
+html[data-theme="dark"] .msg-search-hl { background: #a16207; color: #fef3c7; }
 
 /* Provider bar */
 .provider-bar { display: flex; gap: 6px; }

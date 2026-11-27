@@ -1,4 +1,6 @@
+from html.parser import HTMLParser
 from typing import AsyncIterator
+from urllib.parse import parse_qs, unquote, urlparse
 
 import httpx
 from openai import AsyncOpenAI
@@ -26,6 +28,8 @@ async def stream_chat(
     client = AsyncOpenAI(
         base_url=base_url or settings.llm_base_url,
         api_key=api_key or settings.llm_api_key,
+        timeout=settings.llm_timeout,
+        max_retries=2,
     )
     system = build_system_prompt(role, system_prompt)
     if kb_context:
@@ -73,6 +77,8 @@ async def summarize_messages(
     client = AsyncOpenAI(
         base_url=base_url or settings.llm_base_url,
         api_key=api_key or settings.llm_api_key,
+        timeout=settings.llm_timeout,
+        max_retries=2,
     )
     text = "\n".join(f"[{m['role']}] {m['content'][:2000]}" for m in messages)
     resp = await client.chat.completions.create(
@@ -93,6 +99,53 @@ async def summarize_messages(
     return (resp.choices[0].message.content or "").strip()
 
 
+class LinkParser(HTMLParser):
+    """解析 DuckDuckGo HTML 结果页的 result__a / result__snippet 结构。"""
+
+    def __init__(self):
+        super().__init__()
+        self.in_link = False
+        self.in_snippet = False
+        self.cur = {"title": "", "url": "", "snippet": ""}
+        self.items = []
+
+    def handle_starttag(self, tag, attrs):
+        a = dict(attrs)
+        cls = a.get("class", "")
+        if tag == "a" and "result__a" in cls:
+            self.in_link = True
+            self.cur["url"] = a.get("href", "")
+        if tag == "a" and "result__snippet" in cls:
+            self.in_snippet = True
+
+    def handle_data(self, data):
+        if self.in_link:
+            self.cur["title"] += data
+        if self.in_snippet:
+            self.cur["snippet"] += data
+
+    def handle_endtag(self, tag):
+        if tag == "a" and self.in_link:
+            self.in_link = False
+            if self.cur["title"]:
+                self.items.append(self.cur)
+                self.cur = {"title": "", "url": "", "snippet": ""}
+        if tag == "a" and self.in_snippet:
+            self.in_snippet = False
+
+
+def _clean_ddg_url(raw_url: str) -> str:
+    """解码 DuckDuckGo 跳转链接，还原真实目标 URL。"""
+    url = raw_url.strip()
+    if url.startswith("//"):
+        url = "https:" + url
+    if "/l/?uddg=" in url:
+        query = parse_qs(urlparse(url).query)
+        if query.get("uddg"):
+            url = unquote(query["uddg"][0])
+    return url
+
+
 async def web_search(query: str, max_results: int = 5) -> list[dict]:
     """基于 DuckDuckGo HTML 接口的轻量搜索，无需 API key。"""
     url = "https://html.duckduckgo.com/html/"
@@ -106,49 +159,17 @@ async def web_search(query: str, max_results: int = 5) -> list[dict]:
     except Exception:
         return results
 
-    # 解析 result__a / result__snippet 结构
-    from html.parser import HTMLParser
-
-    class LinkParser(HTMLParser):
-        def __init__(self):
-            super().__init__()
-            self.in_link = False
-            self.in_snippet = False
-            self.cur = {"title": "", "url": "", "snippet": ""}
-            self.items = []
-
-        def handle_starttag(self, tag, attrs):
-            a = dict(attrs)
-            cls = a.get("class", "")
-            if tag == "a" and "result__a" in cls:
-                self.in_link = True
-                self.cur["url"] = a.get("href", "")
-            if tag == "a" and "result__snippet" in cls:
-                self.in_snippet = True
-
-        def handle_data(self, data):
-            if self.in_link:
-                self.cur["title"] += data
-            if self.in_snippet:
-                self.cur["snippet"] += data
-
-        def handle_endtag(self, tag):
-            if tag == "a" and self.in_link:
-                self.in_link = False
-                if self.cur["title"]:
-                    self.items.append(self.cur)
-                    self.cur = {"title": "", "url": "", "snippet": ""}
-            if tag == "a" and self.in_snippet:
-                self.in_snippet = False
-
     parser = LinkParser()
     parser.feed(html)
-    for it in parser.items[:max_results]:
+    seen = set()
+    for it in parser.items:
+        if len(results) >= max_results:
+            break
         title = " ".join(it["title"].split())
         snippet = " ".join(it["snippet"].split())
-        url = it["url"]
-        if url.startswith("//"):
-            url = "https:" + url
-        if title:
-            results.append({"title": title, "url": url, "snippet": snippet})
+        target = _clean_ddg_url(it["url"])
+        if not title or target in seen:
+            continue
+        seen.add(target)
+        results.append({"title": title, "url": target, "snippet": snippet})
     return results

@@ -16,7 +16,7 @@ app = FastAPI(title="智驾辅助 Agent")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.cors_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -24,7 +24,8 @@ app.add_middleware(
 BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FRONTEND_DIR = os.path.join(os.path.dirname(BACKEND_DIR), "frontend")
 
-MAX_UPLOAD = 20 * 1024 * 1024  # 20MB
+MAX_UPLOAD = settings.max_upload_mb * 1024 * 1024
+MAX_IMAGE = 10 * 1024 * 1024  # 单张图片 base64 上限
 
 
 class ChatMessage(BaseModel):
@@ -63,6 +64,11 @@ class SettingsResponse(BaseModel):
     has_api_key: bool
     preset_topics: list[str]
     roles: dict[str, dict]
+
+
+@app.get("/api/health")
+async def health() -> dict:
+    return {"status": "ok"}
 
 
 @app.get("/api/settings")
@@ -175,6 +181,9 @@ async def chat(req: ChatRequest):
         raise HTTPException(status_code=400, detail="LLM API Key 未配置")
 
     # 多模态：把图片附加到最后一条用户消息
+    for img in req.images:
+        if len(img.b64) > MAX_IMAGE:
+            raise HTTPException(status_code=413, detail=f"图片「{img.name}」过大，超过 10MB 限制")
     if req.images:
         parts = [{"type": "text", "text": messages[-1]["content"]}]
         for img in req.images:

@@ -26,9 +26,18 @@ cp .env.example .env
 python backend/run.py
 ```
 
+Windows 用户也可直接双击 `run.bat` 一键启动。
+
 打开浏览器访问 <http://127.0.0.1:8000> 即可使用。
 
 若不想改 `.env`，可直接在页面右上角「⚙️ 接口设置」里填入 Base URL / API Key / 模型，配置保存在浏览器本地。
+
+### Docker 部署
+
+```bash
+docker build -t zhijia-agent .
+docker run -p 8000:8000 --env-file .env zhijia-agent
+```
 
 ## 项目结构
 
@@ -46,6 +55,7 @@ zhijia-agent/
 │   ├── style.css         # 样式
 │   └── app.js            # 聊天交互与流式渲染
 ├── requirements.txt
+├── Dockerfile            # 容器化部署
 └── .env.example
 ```
 
@@ -69,6 +79,10 @@ zhijia-agent/
 ### GET /api/settings
 
 返回服务端默认配置（Base URL、模型、预设话题）与是否已配置 API Key。
+
+### GET /api/health
+
+健康检查，返回 `{"status": "ok"}`。
 
 ## 安全提示
 

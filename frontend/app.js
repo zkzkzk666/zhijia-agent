@@ -147,13 +147,19 @@ const CDN_MIRRORS = {
 };
 
 function loadCss(urls) {
-  for (const url of urls) {
-    const link = document.createElement("link");
-    link.rel = "stylesheet";
-    link.href = url;
-    document.head.appendChild(link);
-    break;
-  }
+  return new Promise((resolve) => {
+    let i = 0;
+    const tryNext = () => {
+      if (i >= urls.length) return resolve(false);
+      const link = document.createElement("link");
+      link.rel = "stylesheet";
+      link.href = urls[i++];
+      link.onload = () => resolve(true);
+      link.onerror = tryNext;
+      document.head.appendChild(link);
+    };
+    tryNext();
+  });
 }
 
 async function loadLibs() {
@@ -368,6 +374,20 @@ function kbTokenize(s) {
   return new Set([...words, ...cjk]);
 }
 
+const kbTokenCache = new Map();
+const KB_CACHE_LIMIT = 2000;
+function kbTokensFor(chunk) {
+  let t = kbTokenCache.get(chunk);
+  if (!t) {
+    t = kbTokenize(chunk);
+    kbTokenCache.set(chunk, t);
+    if (kbTokenCache.size > KB_CACHE_LIMIT) {
+      kbTokenCache.delete(kbTokenCache.keys().next().value);
+    }
+  }
+  return t;
+}
+
 function kbSearch(query, topK) {
   const tokens = kbTokenize(query);
   if (!tokens.size) return [];
@@ -375,7 +395,7 @@ function kbSearch(query, topK) {
   state.kb.forEach((file) => {
     if (!file.enabled) return;
     (file.chunks || []).forEach((chunk) => {
-      const ct = kbTokenize(chunk);
+      const ct = kbTokensFor(chunk);
       let score = 0;
       tokens.forEach((t) => { if (ct.has(t)) score++; });
       if (score > 0) scored.push({ file: file.name, score, chunk });
@@ -931,7 +951,7 @@ function renderMathIn(el) {
       block.parentElement.replaceWith(container);
     } catch (e) { /* keep raw */ }
   });
-  el.innerHTML = el.innerHTML.replace(/\$\$(.+?)\$\$/g, (m, expr) => {
+  el.innerHTML = el.innerHTML.replace(/\$\$([\s\S]+?)\$\$/g, (m, expr) => {
     try {
       return window.katex.renderToString(expr, { displayMode: true, throwOnError: false });
     } catch (e) { return m; }
@@ -985,7 +1005,12 @@ function renderReasoning(row, text) {
 }
 
 function escapeHtml(s) {
-  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 /* ---------- message edit / delete ---------- */
@@ -1195,6 +1220,16 @@ async function sendToLLM(s, images) {
     let buffer = "";
     let reasoning = "";
 
+    let lastRenderTs = 0;
+    const RENDER_THROTTLE = 60;
+    const renderStream = () => {
+      const now = Date.now();
+      if (now - lastRenderTs < RENDER_THROTTLE) return;
+      lastRenderTs = now;
+      renderBubble(bubble, full, true);
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+    };
+
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
@@ -1213,8 +1248,7 @@ async function sendToLLM(s, images) {
         }
         if (data.delta) {
           full += data.delta;
-          renderBubble(bubble, full, true);
-          messagesEl.scrollTop = messagesEl.scrollHeight;
+          renderStream();
         }
       }
     }
@@ -1249,7 +1283,6 @@ async function maybeCompress(s) {
   // 当消息超过阈值且没有摘要时，压缩中间的历史
   if (s.summary) return;
   if (s.messages.length < 16) return;
-  const head = s.messages.slice(0, -2);
   const tailCount = 6;
   const toCompress = s.messages.slice(0, Math.max(0, s.messages.length - tailCount));
   if (toCompress.length < 8) return;
@@ -1360,9 +1393,33 @@ function toggleMsgSearch() {
 }
 function clearMsgHighlight() {
   document.querySelectorAll(".msg-search-hl").forEach((el) => {
-    const p = el.parentElement;
-    p.textContent = p.textContent;
-    p.replaceWith(...p.childNodes);
+    const txt = document.createTextNode(el.textContent || "");
+    el.parentNode.replaceChild(txt, el);
+  });
+}
+
+function highlightMessages(kw) {
+  clearMsgHighlight();
+  const lower = kw.toLowerCase();
+  const walker = document.createTreeWalker(document.getElementById("messages"), NodeFilter.SHOW_TEXT);
+  const nodes = [];
+  while (walker.nextNode()) nodes.push(walker.currentNode);
+  nodes.forEach((node) => {
+    const text = node.nodeValue || "";
+    if (!text.toLowerCase().includes(lower)) return;
+    const frag = document.createDocumentFragment();
+    let rest = text;
+    while (rest.length) {
+      const idx = rest.toLowerCase().indexOf(lower);
+      if (idx === -1) { frag.appendChild(document.createTextNode(rest)); break; }
+      if (idx > 0) frag.appendChild(document.createTextNode(rest.slice(0, idx)));
+      const mark = document.createElement("span");
+      mark.className = "msg-search-hl";
+      mark.textContent = rest.slice(idx, idx + kw.length);
+      frag.appendChild(mark);
+      rest = rest.slice(idx + kw.length);
+    }
+    node.parentNode.replaceChild(frag, node);
   });
 }
 $("#msgSearchClose").addEventListener("click", () => {
@@ -1375,7 +1432,12 @@ $("#msgSearchInput").addEventListener("input", () => {
   clearTimeout(msgSearchTimer);
   msgSearchTimer = setTimeout(() => {
     const kw = $("#msgSearchInput").value.trim().toLowerCase();
-    if (!kw) { clearMsgHighlight(); $("#msgSearchCount").textContent = ""; return; }
+    if (!kw) {
+      clearMsgHighlight();
+      $("#msgSearchCount").textContent = "";
+      return;
+    }
+    highlightMessages(kw);
     const s = getActive();
     let count = 0;
     s.messages.forEach((m) => {
