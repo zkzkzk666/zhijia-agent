@@ -82,6 +82,13 @@ async def get_settings() -> SettingsResponse:
     )
 
 
+@app.get("/api/kb")
+async def get_builtin_kb() -> dict:
+    from .kb import list_builtin_kb
+
+    return {"items": list_builtin_kb()}
+
+
 @app.get("/api/prompt")
 async def get_prompt(role: str = "general") -> dict:
     from .prompt import build_system_prompt

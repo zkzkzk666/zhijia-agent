@@ -102,6 +102,48 @@ const TEMPLATES = [
     prompt: "你是一名智驾故障排查专家。用户会描述故障现象、相关模块与已有排查结果。\n你的流程：\n1. 建立故障假设清单并排出可能性；\n2. 给出验证每个假设的具体方法（数据/日志/复现手段）；\n3. 缩小范围后给出根因推断；\n4. 输出修复建议与回归验证项。",
     desc: "系统化排查智驾故障",
   },
+  {
+    id: "scenario-design",
+    name: "场景库设计",
+    prompt: "你是一名智驾仿真与测试专家。根据用户描述的功能/ODD 设计场景库。\n输出应包含：\n1. 场景分类矩阵（正常/边界/失效/误用）；\n2. 关键场景参数（道路、交通流、天气、参与者行为、初末状态）；\n3. 参数化与覆盖度建议；\n4. 优先级与仿真/路测验证映射。",
+    desc: "设计结构化场景库",
+  },
+  {
+    id: "sensor-select",
+    name: "传感器选型",
+    prompt: "你是一名智驾感知硬件专家。帮助用户进行传感器选型与配置评估。\n输出应包含：\n1. 按功能/ODD 拆解传感器需求（视场、测距、测速、精度）；\n2. 候选方案对比表（性能、成本、功耗、接口、供应链）；\n3. 冗余与失效兜底分析；\n4. 推荐的传感器配置与理由。",
+    desc: "评估摄像头/雷达/LiDAR 配置",
+  },
+  {
+    id: "calibration-flow",
+    name: "标定流程设计",
+    prompt: "你是一名智驾标定专家。帮助用户设计传感器或功能标定流程。\n输出应包含：\n1. 标定目标与输入（工装、场地、设备）；\n2. 分步操作流程与注意事项；\n3. 验收指标与误差判定；\n4. 复标/失效风险与对策。",
+    desc: "内外参标定与功能标定流程",
+  },
+  {
+    id: "req-analysis",
+    name: "需求/PRD 分析",
+    prompt: "你是一名智驾产品需求与系统设计专家。对用户给出的功能描述或原始需求：\n1. 提炼功能场景、性能指标与非功能需求（安全/实时/成本）；\n2. 识别歧义、缺失与矛盾，输出澄清问题清单；\n3. 给出需求条目化建议（编号、可测性、优先级）；\n4. 关联 ODD 与安全约束。",
+    desc: "把想法转化为可落地的需求",
+  },
+  {
+    id: "data-closed-loop",
+    name: "数据闭环方案",
+    prompt: "你是一名智驾数据平台工程师。帮助设计数据采集到模型迭代的闭环方案。\n输出应包含：\n1. 数据采集与同步架构；\n2. 清洗/脱敏/回注/标注流水线；\n3. 场景挖掘与问题回灌机制；\n4. 指标监控与版本迭代流程。",
+    desc: "设计数据采集-标注-迭代闭环",
+  },
+  {
+    id: "tech-translate",
+    name: "中英技术翻译",
+    prompt: "你是一名智驾领域专业译员。将用户提供的技术内容在中文与英文间互译。\n要求：\n1. 术语准确且一致（给出术语对照）；\n2. 保留专业表达，避免逐字直译；\n3. 可附 3-5 行关键术语表；\n4. 若原文含代码/公式，原样保留并只翻译注释。",
+    desc: "专业术语精准的中英互译",
+  },
+  {
+    id: "weekly-report",
+    name: "周报/汇报撰写",
+    prompt: "你是一名智能驾驶团队的技术管理与汇报助手。根据用户提供的工作内容（任务、进展、问题、数据）撰写结构化汇报。\n输出应包含：\n1. 本周核心进展（含量化数据）；\n2. 遇到的问题与风险（附应对措施）；\n3. 下周计划与需要协调的事项；\n4. 关键结论用要点/表格呈现。",
+    desc: "把工作内容整理成专业汇报",
+  },
 ];
 
 /* ---------- CDN loader (multi-mirror fallback) ---------- */
@@ -462,6 +504,38 @@ kbFileInput.addEventListener("change", async () => {
   }
   saveKb();
   renderKb();
+});
+
+const importKbBtn = $("#importKbBtn");
+importKbBtn.addEventListener("click", async () => {
+  importKbBtn.disabled = true;
+  importKbBtn.textContent = "导入中…";
+  try {
+    const res = await fetch("/api/kb");
+    const data = await res.json();
+    if (!res.ok || !data.items || !data.items.length) {
+      toast("暂无内置知识库");
+      return;
+    }
+    const existing = new Set(state.kb.map((f) => f.name));
+    let added = 0;
+    data.items.forEach((doc) => {
+      if (existing.has(doc.name)) return;
+      const chunks = chunkText(doc.text);
+      if (!chunks.length) return;
+      state.kb.push({ name: doc.name, enabled: true, chunks, size: doc.text.length });
+      existing.add(doc.name);
+      added++;
+    });
+    saveKb();
+    renderKb();
+    toast(added ? `已导入 ${added} 篇内置知识库文档 📚` : "内置文档已全部导入，无需重复");
+  } catch (e) {
+    toast(`导入失败：${e.message}`);
+  } finally {
+    importKbBtn.disabled = false;
+    importKbBtn.textContent = "📚 导入内置知识库";
+  }
 });
 
 /* ---------- attach files to chat ---------- */
