@@ -16,6 +16,7 @@ async def stream_chat(
     model: str | None = None,
     role: str = "general",
     system_prompt: str | None = None,
+    template_prompt: str | None = None,
     kb_context: str | None = None,
     summary_context: str | None = None,
     temperature: float = 0.7,
@@ -31,7 +32,7 @@ async def stream_chat(
         timeout=settings.llm_timeout,
         max_retries=2,
     )
-    system = build_system_prompt(role, system_prompt)
+    system = build_system_prompt(role, system_prompt, template_prompt)
     if kb_context:
         system += "\n\n" + kb_context
     if summary_context:

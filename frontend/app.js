@@ -1229,10 +1229,8 @@ async function sendToLLM(s, images) {
   const kbCtx = lastUserMsg ? kbContextFor(lastUserMsg.content) : "";
   const template = activeTemplate();
   const styleText = state.settings.style || "";
-  const systemPrompt = [state.settings.systemPrompt, template.prompt, styleText]
-    .filter(Boolean)
-    .join("\n\n")
-    || null;
+  const customPrompt = (state.settings.systemPrompt || "").trim() || null;
+  const templatePrompt = [template.prompt, styleText].filter(Boolean).join("\n\n") || null;
 
   // 联网搜索
   let searchContext = "";
@@ -1269,7 +1267,8 @@ async function sendToLLM(s, images) {
         api_key: state.settings.apiKey || null,
         model: state.settings.model || null,
         role: s.role || state.settings.role || "general",
-        system_prompt: systemPrompt,
+        system_prompt: customPrompt,
+        template_prompt: templatePrompt,
         kb_context: kbCtx,
         search_context: searchContext,
         summary_context: summaryContext,

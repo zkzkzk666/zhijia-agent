@@ -64,6 +64,8 @@ body {
   padding: 20px;
   flex-shrink: 0;
   backdrop-filter: blur(10px);
+  overflow-y: auto;
+  min-height: 0;
 }
 
 .brand { display: flex; gap: 12px; align-items: center; margin-bottom: 18px; }
@@ -99,7 +101,15 @@ html[data-theme="dark"] .btn.danger { background: #7f1d1d; color: #fecaca; borde
 .btn.round { border-radius: 50px; padding: 10px 22px; }
 
 /* Sessions */
-.sessions { display: flex; flex-direction: column; gap: 5px; margin-bottom: 18px; }
+.sessions {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-bottom: 18px;
+  max-height: 32vh;
+  overflow-y: auto;
+  flex-shrink: 0;
+}
 .session-item {
   display: flex; align-items: center; justify-content: space-between;
   padding: 9px 12px;
@@ -228,7 +238,14 @@ html[data-theme="dark"] .btn.danger { background: #7f1d1d; color: #fecaca; borde
 .footer-btns { display: flex; gap: 8px; margin-bottom: 10px; }
 .btn.half { flex: 1; padding: 9px 8px; font-size: 13px; margin-bottom: 0; }
 
-.sidebar-footer { margin-top: auto; }
+.sidebar-footer {
+  margin-top: auto;
+  position: sticky;
+  bottom: 0;
+  padding-top: 10px;
+  background: var(--bg-card);
+  border-top: 1px solid var(--border);
+}
 
 /* ============ Main ============ */
 #main { flex: 1; display: flex; flex-direction: column; min-width: 0; position: relative; }

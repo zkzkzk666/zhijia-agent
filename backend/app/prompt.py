@@ -113,11 +113,19 @@ ROLES = {
 }
 
 
-def build_system_prompt(role: str, custom: str | None = None) -> str:
-    role_prompt = ROLES.get(role, ROLES["general"]).get("prompt", "")
+def build_system_prompt(role: str, custom: str | None = None, extra: str | None = None) -> str:
+    """拼装系统提示词。
+
+    - custom：用户在设置里填写的「自定义系统提示词」，若提供则完全覆盖其他内容。
+    - extra：提示词模板 / 回复偏好等附加指令，叠加在角色提示词之上，不覆盖智驾领域设定。
+    """
     if custom and custom.strip():
         return custom.strip()
-    return "\n".join(part for part in (BASE_PROMPT, role_prompt) if part)
+    role_prompt = ROLES.get(role, ROLES["general"]).get("prompt", "")
+    parts = [BASE_PROMPT, role_prompt]
+    if extra and extra.strip():
+        parts.append(extra.strip())
+    return "\n".join(part for part in parts if part)
 
 
 PRESET_TOPICS = [

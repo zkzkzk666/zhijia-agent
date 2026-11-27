@@ -46,6 +46,7 @@ class ChatRequest(BaseModel):
     model: str | None = None
     role: str = "general"
     system_prompt: str | None = None
+    template_prompt: str | None = None
     kb_context: str | None = None
     search_context: str | None = None
     summary_context: str | None = None
@@ -217,6 +218,7 @@ async def chat(req: ChatRequest):
                 model=req.model,
                 role=req.role,
                 system_prompt=req.system_prompt,
+                template_prompt=req.template_prompt,
                 kb_context=req.kb_context,
                 summary_context=extra_ctx or None,
                 temperature=req.temperature,
