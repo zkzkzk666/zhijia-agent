@@ -899,7 +899,7 @@ function renderRoles(roles) {
   Object.entries(roles).forEach(([key, r]) => {
     const btn = document.createElement("button");
     btn.className = "role-chip" + (key === state.settings.role ? " active" : "");
-    btn.innerHTML = `${r.icon} ${r.name}`;
+    btn.innerHTML = `<span class="role-icon">${r.icon}</span><span>${r.name}</span>`;
     btn.onclick = () => {
       state.settings.role = key;
       state.settings.templateId = "none";
